@@ -6,9 +6,12 @@ from datetime import datetime
 
 class UserRoles:
     USER = "user"
-    PM = "pm"
-    BM = "bm"
+    PM = "project_manager"
+    BM = "book_manager"
     ADMIN = "admin"
+    @classmethod
+    def values(cls):
+        return [cls.USER, cls.PM, cls.BM, cls.ADMIN]
 
     
 class User:
