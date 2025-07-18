@@ -14,24 +14,44 @@ def serialize_project(project):
         "updatedAt": project.get("updatedAt", datetime.utcnow()).isoformat(),
     }
 
+COLLECTION_NAME = "project-details"
 # Get all projects
 def get_all_projects(mongo):
     projects = mongo.db["project-details"].find()
     return [serialize_project(p) for p in projects]
 
-# Get a single project by ID
 def get_project_by_id(mongo, project_id):
-    project = mongo.db["project-details"].find_one({"_id": ObjectId(project_id)})
-    if not project:
-        return None
-    return serialize_project(project)
+    project = mongo.db[COLLECTION_NAME].find_one({"_id": ObjectId(project_id)})
+    if project:
+        project["_id"] = str(project["_id"])
+    return project
 
-# Create a new project
-def create_project(mongo, data):
-    now = datetime.utcnow()
-    data["createdAt"] = now
-    data["updatedAt"] = now
-    result = mongo.db["Project-details"].insert_one(data)
-    return str(result.inserted_id)
+def create_project(mongo, project_data):
+    result = mongo.db[COLLECTION_NAME ].insert_one(project_data)
+    return result.inserted_id
 
-# Optional: delete or update functions can be added similarly
+def update_project(mongo, project_id, update_fields):
+    result = mongo.db[COLLECTION_NAME ].update_one(
+        {"_id": ObjectId(project_id)},
+        {"$set": update_fields}
+    )
+    return result.modified_count > 0
+
+def delete_project(mongo, project_id):
+    result = mongo.db[COLLECTION_NAME ].delete_one({"_id": ObjectId(project_id)})
+    return result.deleted_count > 0
+
+def get_projects_by_creator(mongo, user_id):
+    projects = mongo.db["project-details"].find({
+        "createdBy": ObjectId(user_id)
+    })
+    return [serialize_project(p) for p in projects]
+
+
+def get_projects_by_member(mongo, user_id):
+    return list(
+        mongo.db.projects.find({
+            "memberIds": ObjectId(user_id)
+        })
+    )
+

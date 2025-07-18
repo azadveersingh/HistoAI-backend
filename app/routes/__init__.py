@@ -12,6 +12,8 @@ def register_blueprints(app):
     from .otp_auth import otp_bp
     from .project_routes import project_bp
     from .admin_routes import admin_bp
+    from .book_routes import book_bp
+    from .collection_routes import collection_bp
     
 
   
@@ -27,3 +29,6 @@ def register_blueprints(app):
     app.register_blueprint(otp_bp)
     app.register_blueprint(project_bp)
     app.register_blueprint(admin_bp)
+    app.register_blueprint(book_bp)
+    app.register_blueprint(collection_bp)
+

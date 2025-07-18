@@ -3,7 +3,7 @@ from flask_cors import CORS
 from .config import Config
 from .extensions import mongo, bcrypt, jwt, socketio
 
-from .routes import auth, profile, file_upload, data, token_usage, file_routes,file_upload, otp_auth, project_routes, admin_routes
+from .routes import auth, profile, file_upload, data, token_usage, file_routes,file_upload, otp_auth, project_routes, admin_routes, book_routes, collection_routes
 
 
 def create_app():
@@ -38,6 +38,8 @@ def create_app():
     app.register_blueprint(otp_auth.otp_bp)
     app.register_blueprint(project_routes.project_bp)
     app.register_blueprint(admin_routes.admin_bp)
+    app.register_blueprint(book_routes.book_bp)
+    app.register_blueprint(collection_routes.collection_bp)
 
 
     return app

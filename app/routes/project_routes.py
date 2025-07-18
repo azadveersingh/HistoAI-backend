@@ -3,7 +3,7 @@ from flask_jwt_extended import jwt_required, get_jwt_identity
 from bson import ObjectId
 from datetime import datetime
 
-from ..models import project_model, user
+from ..models import project_model
 from ..extensions import mongo
 from ..helpers.auth_helpers import role_required
 from ..models.user import UserRoles
@@ -12,7 +12,8 @@ project_bp = Blueprint("project", __name__, url_prefix="/api/projects")
 
 # ------------------ GET: All Projects ------------------
 @project_bp.route("", methods=["GET"])
-# @jwt_required()
+@jwt_required()
+@role_required([UserRoles.ADMIN])
 def fetch_projects():
     try:
         projects = project_model.get_all_projects(mongo)
@@ -24,7 +25,7 @@ def fetch_projects():
 
 # ------------------ GET: Project by ID ------------------
 @project_bp.route("/<project_id>", methods=["GET"])
-# @jwt_required()
+@jwt_required()
 def get_project(project_id):
     try:
         project = project_model.get_project_by_id(mongo, project_id)
@@ -46,7 +47,7 @@ def create_project():
         data = request.get_json()
 
         name = data.get("name")
-        member_ids = data.get("memberIds", [])
+        # member_ids = data.get("memberIds", [])
         collection_ids = data.get("collectionIds", [])
         book_ids = data.get("bookIds", [])
         chat_history_id = data.get("chatHistoryId")
@@ -56,7 +57,7 @@ def create_project():
 
         project_data = {
             "name": name,
-            "memberIds": [ObjectId(m) for m in member_ids],
+            # "memberIds": [ObjectId(m) for m in member_ids],
             "collectionIds": [ObjectId(c) for c in collection_ids],
             "bookIds": [ObjectId(b) for b in book_ids],
             "chatHistoryId": ObjectId(chat_history_id) if chat_history_id else None,
@@ -71,23 +72,63 @@ def create_project():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+from flask import Blueprint, jsonify, request
+
+# ------------------ GET: Projects for Current User ------------------
+@project_bp.route("/my", methods=["GET"])
+@jwt_required()
+@role_required([UserRoles.PM, UserRoles.BM])
+def get_my_projects():
+    try:
+        user_id = get_jwt_identity()
+        projects = project_model.get_projects_by_creator(mongo, user_id)
+        return jsonify({"projects": projects}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ------------------ GET: Project by ID (own only) ------------------
+@project_bp.route("/my/<project_id>", methods=["GET"])
+@jwt_required()
+@role_required([UserRoles.PM, UserRoles.BM])
+def get_own_project(project_id):
+    try:
+        user_id = get_jwt_identity()
+        project = project_model.get_project_by_id(mongo, project_id)
+
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        if str(project.get("createdBy")) != user_id:
+            return jsonify({"error": "Unauthorized"}), 403
+
+        return jsonify(project), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 # ------------------ PATCH: Update Project ------------------
 @project_bp.route("/<project_id>", methods=["PATCH"])
-@jwt_required()
+# @jwt_required()
 @role_required([UserRoles.PM, UserRoles.BM])
 def update_project(project_id):
     try:
         if not ObjectId.is_valid(project_id):
             return jsonify({"error": "Invalid project ID"}), 400
-
+        
+        project = project_model.get_project_by_id(mongo, project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+        if str(project.get("createdBy")) != get_jwt_identity():
+            return jsonify({"error": "Unauthorized"}), 403
+        
         data = request.get_json()
         update_fields = {}
-        allowed_fields = ["name", "memberIds", "collectionIds", "bookIds", "chatHistoryId"]
+        allowed_fields = ["name", "collectionIds", "bookIds", "chatHistoryId"]
 
         for key in allowed_fields:
             if key in data:
-                if key in ["memberIds", "collectionIds", "bookIds"]:
+                if key in ["collectionIds", "bookIds"]:
                     update_fields[key] = [ObjectId(i) for i in data[key]]
                 elif key == "chatHistoryId":
                     update_fields[key] = ObjectId(data[key])
@@ -113,7 +154,13 @@ def delete_project(project_id):
     try:
         if not ObjectId.is_valid(project_id):
             return jsonify({"error": "Invalid project ID"}), 400
-
+        
+        project = project_model.get_project_by_id(mongo, project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+        if str(project.get("createdBy")) != get_jwt_identity():
+            return jsonify({"error": "Unauthorized"}), 403
+        
         deleted = project_model.delete_project(mongo, project_id)
         if deleted:
             return jsonify({"message": "Project deleted successfully"}), 200
@@ -122,33 +169,14 @@ def delete_project(project_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
-
-
-# from flask import Blueprint, jsonify, request
-# from bson import ObjectId
-# from ..models import project_model
-# from ..extensions import mongo
-
-# project_bp = Blueprint("project", __name__)
-
-# @project_bp.route("/api/projects", methods=["GET"])
-# def fetch_projects():
-#     try:
-#         projects = project_model.get_all_projects(mongo)
-#         print(f"all Project{projects}")
-#         return jsonify({"projects":projects}), 200
-#     except Exception as e:
-#         return jsonify({"error": str(e)}), 500
-
-# @project_bp.route("/api/projects/<project_id>", methods=["GET"])
-# def get_project(project_id):
-#     try:
-#         project = project_model.get_project_by_id(mongo, project_id)
-#         if project:
-#             return jsonify(project), 200
-#         else:
-#             return jsonify({"error": "Project not found"}), 404
-#     except Exception as e:
-#         return jsonify({"error": str(e)}), 500
-    
+# ------------------ GET: Projects where user is a member ------------------
+@project_bp.route("/member", methods=["GET"])
+@jwt_required()
+@role_required([UserRoles.USER])
+def get_member_projects():
+    try:
+        user_id = get_jwt_identity()
+        projects = project_model.get_projects_by_member(mongo, user_id)
+        return jsonify({"projects": projects}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
