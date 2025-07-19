@@ -1,7 +1,7 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from bson import ObjectId
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ..extensions import mongo
 from ..models import collection_model, project_model
@@ -22,14 +22,11 @@ def create_collection():
         name = data.get("name", "").strip()
         book_ids = data.get("bookIds", [])
         project_id = data.get("projectId")
-        member_ids = data.get("memberIds", [])
 
         if not name:
             return jsonify({"error": "Collection name is required"}), 400
         if not book_ids:
             return jsonify({"error": "At least one book is required"}), 400
-        if not member_ids:
-            return jsonify({"error": "At least one member is required"}), 400
 
         user_id = get_jwt_identity()
 
@@ -38,37 +35,76 @@ def create_collection():
             "bookIds": [ObjectId(bid) for bid in book_ids if ObjectId.is_valid(bid)],
             "createdBy": ObjectId(user_id),
             "projectId": ObjectId(project_id) if project_id and ObjectId.is_valid(project_id) else None,
-            "memberIds": [ObjectId(mid) for mid in member_ids if ObjectId.is_valid(mid)],
-            "createdAt": datetime.utcnow(),
-            "updatedAt": datetime.utcnow()
+            "createdAt": datetime.now(timezone.utc),
+            "updatedAt": datetime.now(timezone.utc),
         }
 
         # Step 1: Create the collection
         collection_id = collection_model.create_collection(mongo, doc)
 
-        # Step 2: If projectId is valid, update the project's collectionIds and memberIds
+        # Step 2: If projectId is valid, update the project's collectionIds
         if project_id and ObjectId.is_valid(project_id):
             project_object_id = ObjectId(project_id)
-
-            # Update the project's collectionIds and memberIds
             mongo.db["project-details"].update_one(
                 {"_id": project_object_id},
                 {
                     "$addToSet": {
-                        "collectionIds": ObjectId(collection_id),
-                        "memberIds": {
-                            "$each": [ObjectId(mid) for mid in member_ids if ObjectId.is_valid(mid)]
-                        }
+                        "collectionIds": ObjectId(collection_id)
                     }
                 }
             )
-
         
         return jsonify({"message": "Collection created", "collectionId": str(collection_id)}), 201
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ---------- Add Collections to Project ----------
+@collection_bp.route("/<project_id>/add", methods=["POST"])
+@jwt_required()
+@role_required(ALLOWED_ROLES)
+def add_collections_to_project(project_id):
+    try:
+        if not ObjectId.is_valid(project_id):
+            return jsonify({"error": "Invalid project ID"}), 400
+
+        user_id = ObjectId(get_jwt_identity())
+        project = project_model.get_project_by_id(mongo, project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+        if str(project.get("createdBy")) != str(user_id):
+            return jsonify({"error": "Unauthorized: Only the project creator can add collections"}), 403
+
+        data = request.get_json()
+        collection_ids = data.get("collectionIds", [])
+
+        if not collection_ids:
+            return jsonify({"error": "At least one collection ID is required"}), 400
+
+        valid_collection_ids = [ObjectId(cid) for cid in collection_ids if ObjectId.is_valid(cid)]
+
+        # Update the project's collectionIds
+        result = mongo.db["project-details"].update_one(
+            {"_id": ObjectId(project_id)},
+            {
+                "$addToSet": {
+                    "collectionIds": {"$each": valid_collection_ids}
+                }
+            }
+        )
+
+        if result.modified_count > 0:
+            # Update collections to set their projectId
+            mongo.db["collections"].update_many(
+                {"_id": {"$in": valid_collection_ids}},
+                {"$set": {"projectId": ObjectId(project_id), "updatedAt": datetime.now(timezone.utc)}}
+            )
+            return jsonify({"message": "Collections added to project"}), 200
+        else:
+            return jsonify({"error": "No changes made to the project"}), 400
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 # ---------- Get All Visible Collections ----------
 @collection_bp.route("", methods=["GET"])
@@ -85,7 +121,6 @@ def get_all_collections():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 # ---------- Get Collection By ID (If creator or member) ----------
 @collection_bp.route("/<collection_id>", methods=["GET"])
@@ -113,7 +148,6 @@ def get_collection(collection_id):
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 # ---------- Update Collection (Only Creator) ----------
 @collection_bp.route("/<collection_id>", methods=["PATCH"])
@@ -157,7 +191,7 @@ def update_collection(collection_id):
             current_books = collection.get("bookIds", [])
             update_fields["bookIds"] = [bid for bid in current_books if bid not in remove_ids]
 
-        update_fields["updatedAt"] = datetime.utcnow()
+        update_fields["updatedAt"] = datetime.now(timezone.utc)
 
         success = collection_model.update_collection(mongo, collection_id, update_fields)
         if success:
@@ -167,7 +201,6 @@ def update_collection(collection_id):
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 # ---------- Delete Collection (Only Creator) ----------
 @collection_bp.route("/<collection_id>", methods=["DELETE"])

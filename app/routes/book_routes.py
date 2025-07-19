@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from werkzeug.utils import secure_filename
 from bson import ObjectId
-from datetime import datetime
+from datetime import datetime, timezone
 import os
 
 from ..models import book_model
@@ -83,8 +83,8 @@ def upload_books():
                 "previewUrl": preview_rel_path,  # relative path
                 "ocrProcessId": None,
                 "createdBy": ObjectId(user_id),
-                "createdAt": datetime.utcnow(),
-                "updatedAt": datetime.utcnow()
+                "createdAt": datetime.now(timezone.utc),
+                "updatedAt": datetime.now(timezone.utc)
             }
 
             inserted_id = book_model.create_book(mongo, book_doc)

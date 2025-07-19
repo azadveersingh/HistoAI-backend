@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required
 from bson.objectid import ObjectId
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ..extensions import mongo
 from ..models.user import User, UserRoles
@@ -57,8 +57,8 @@ def toggle_user_status(user_id):
             {"_id": ObjectId(user_id)},
             {"$set": {
                 "isActive": bool(is_active),
-                "updatedAt": datetime.utcnow(),
-                "lastLogin": datetime.utcnow(),
+                "updatedAt": datetime.now(timezone.utc),
+                "lastLogin": datetime.now(timezone.utc),
                 "loginAttempts": 0
             }}
         )
@@ -112,7 +112,7 @@ def update_user_role(user_id):
             {"_id": ObjectId(user_id)},
             {"$set": {
                 "role": new_role,
-                "updatedAt": datetime.utcnow()
+                "updatedAt": datetime.now(timezone.utc)
             }}
         )
 

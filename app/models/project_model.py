@@ -1,5 +1,5 @@
 from bson import ObjectId
-from datetime import datetime
+from datetime import datetime, timezone
 
 def serialize_project(project):
     return {
@@ -10,8 +10,8 @@ def serialize_project(project):
         "bookIds": [str(bid) for bid in project.get("bookIds", [])],
         "chatHistoryId": str(project.get("chatHistoryId", "")) if project.get("chatHistoryId") else None,
         "createdBy": str(project.get("createdBy", "")) if project.get("createdBy") else None,
-        "createdAt": project.get("createdAt", datetime.utcnow()).isoformat(),
-        "updatedAt": project.get("updatedAt", datetime.utcnow()).isoformat(),
+        "createdAt": project.get("createdAt", datetime.now(timezone.utc)).isoformat(),
+        "updatedAt": project.get("updatedAt", datetime.now(timezone.utc)).isoformat(),
     }
 
 COLLECTION_NAME = "project-details"

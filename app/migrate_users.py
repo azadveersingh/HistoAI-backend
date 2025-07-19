@@ -1,6 +1,6 @@
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
-from datetime import datetime
+from datetime import datetime, timezone
 
 # MongoDB Atlas URI
 MONGO_URI = "mongodb+srv://KTB:ktb%402025@cluster0.umatstc.mongodb.net/KTB?retryWrites=true&w=majority&appName=Cluster0"
@@ -62,8 +62,8 @@ def migrate_users():
                     "bio": user.get("bio", ""),
                     "status": user.get("status", "Available"),
                     "avatar": user.get("avatar", None),
-                    "createdAt": user.get("createdAt", datetime.utcnow()),
-                    "updatedAt": user.get("updatedAt", datetime.utcnow()),
+                    "createdAt": user.get("createdAt", datetime.now(timezone.utc)),
+                    "updatedAt": user.get("updatedAt", datetime.now(timezone.utc)),
                     "lastLogin": user.get("lastLogin", None)
                 }
                 

@@ -1,8 +1,7 @@
 from ..extensions import mongo, bcrypt
 from bson.objectid import ObjectId
 import pymongo
-
-from datetime import datetime
+from datetime import datetime, timezone
 
 class UserRoles:
     USER = "user"
@@ -39,8 +38,8 @@ class User:
             "bio": "",
             "status": "Available",
             "avatar": None,
-            "createdAt": datetime.utcnow(),
-            "updatedAt": datetime.utcnow(),
+            "createdAt": datetime.now(timezone.utc),
+            "updatedAt": datetime.now(timezone.utc),
             "lastLogin": None
         }
         result = mongo.db.users.insert_one(user_data)

@@ -1,5 +1,5 @@
 from bson import ObjectId
-from datetime import datetime
+from datetime import datetime, timezone
 
 COLLECTIONS_COLLECTION = "collections"
 
@@ -10,8 +10,8 @@ def serialize_collection(doc):
         "bookIds": [str(bid) for bid in doc.get("bookIds", [])],
         "projectId": str(doc["projectId"]) if doc.get("projectId") else None,
         "createdBy": str(doc["createdBy"]) if doc.get("createdBy") else None,
-        "createdAt": doc.get("createdAt", datetime.utcnow()).isoformat(),
-        "updatedAt": doc.get("updatedAt", datetime.utcnow()).isoformat(),
+        "createdAt": doc.get("createdAt", datetime.now(timezone.utc)).isoformat(),
+        "updatedAt": doc.get("updatedAt", datetime.now(timezone.utc)).isoformat(),
     }
 
 
@@ -27,8 +27,8 @@ def get_visible_collections(mongo, user_id, member_project_ids):
 
 
 def create_collection(mongo, data):
-    data["createdAt"] = datetime.utcnow()
-    data["updatedAt"] = datetime.utcnow()
+    data["createdAt"] = datetime.now(timezone.utc)
+    data["updatedAt"] = datetime.now(timezone.utc)
     result = mongo.db[COLLECTIONS_COLLECTION].insert_one(data)
     return str(result.inserted_id)
 
@@ -41,7 +41,7 @@ def get_collection_by_id(mongo, collection_id):
     return serialize_collection(doc) if doc else None
 
 def update_collection(mongo, collection_id, update_data):
-    update_data["updatedAt"] = datetime.utcnow()
+    update_data["updatedAt"] = datetime.now(timezone.utc)
     result = mongo.db[COLLECTIONS_COLLECTION].update_one(
         {"_id": ObjectId(collection_id)},
         {"$set": update_data}

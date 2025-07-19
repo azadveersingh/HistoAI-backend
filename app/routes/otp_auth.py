@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 import random
 import smtplib
 import os
@@ -56,7 +56,7 @@ def register_init():
     user_id = User.create(full_name, email, password, isVerified=False)
 
     otp = str(random.randint(100000, 999999))
-    expiry = datetime.utcnow() + timedelta(minutes=10)
+    expiry = datetime.now(timezone.utc) + timedelta(minutes=10)
 
     mongo.db.users.update_one(
         {"_id": ObjectId(user_id)},
@@ -86,7 +86,7 @@ def register_init():
                 <p>Regards,<br><strong>Graphiti Multimedia</strong></p>
             </div>
             <div style="background-color: #f1f1f1; text-align: center; padding: 15px; font-size: 12px; color: #777;">
-                © {datetime.utcnow().year} Graphiti Multimedia. All rights reserved.
+                © {datetime.now(timezone.utc).year} Graphiti Multimedia. All rights reserved.
             </div>
             </div>
         </body>
@@ -123,7 +123,7 @@ def verify_register_otp():
 
     if (
         user.get("otpCode") != otp_input or
-        user.get("otpExpiry") < datetime.utcnow()
+        user.get("otpExpiry") < datetime.now(timezone.utc)
     ):
         return jsonify({"message": "Invalid or expired OTP"}), 401
 
@@ -134,7 +134,7 @@ def verify_register_otp():
             "otpVerified": True,
             "otpCode": None,
             "otpExpiry": None,
-            "updatedAt": datetime.utcnow()
+            "updatedAt": datetime.now(timezone.utc)
         }}
     )
 

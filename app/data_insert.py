@@ -1,5 +1,5 @@
 import random
-from datetime import datetime
+from datetime import datetime, timezone
 from bson import ObjectId
 from pymongo import MongoClient
 
@@ -33,7 +33,7 @@ def create_dummy_object_ids(count=3):
     return [ObjectId() for _ in range(count)]
 
 def generate_project_data():
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     return [
         {
             "_id": ObjectId(),

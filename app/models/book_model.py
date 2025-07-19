@@ -1,5 +1,5 @@
 from bson import ObjectId
-from datetime import datetime
+from datetime import datetime, timezone
 
 BOOK_COLLECTION = "books"
 
@@ -17,8 +17,8 @@ def serialize_book(book):
         "previewUrl": book.get("previewUrl"),
         "ocrProcessId": str(book["ocrProcessId"]) if book.get("ocrProcessId") else None,
         "createdBy": str(book["createdBy"]) if book.get("createdBy") else None,
-        "createdAt": book.get("createdAt", datetime.utcnow()).isoformat(),
-        "updatedAt": book.get("updatedAt", datetime.utcnow()).isoformat()
+        "createdAt": book.get("createdAt", datetime.now(timezone.utc)).isoformat(),
+        "updatedAt": book.get("updatedAt", datetime.now(timezone.utc)).isoformat()
     }
 
 # Create a new book with metadata
@@ -40,7 +40,7 @@ def get_book_by_id(mongo, book_id):
 
 # Update book metadata
 def update_book(mongo, book_id, update_fields):
-    update_fields["updatedAt"] = datetime.utcnow()
+    update_fields["updatedAt"] = datetime.now(timezone.utc)
     result = mongo.db[BOOK_COLLECTION].update_one(
         {"_id": ObjectId(book_id)},
         {"$set": update_fields}
@@ -59,7 +59,7 @@ def get_books_by_creator(mongo, user_id):
 
 # Change Book Visiblity
 def update_book(mongo, book_id, update_fields):
-    update_fields["updatedAt"] = datetime.utcnow()
+    update_fields["updatedAt"] = datetime.now(timezone.utc)
     result = mongo.db[BOOK_COLLECTION].update_one(
         {"_id": ObjectId(book_id)},
         {"$set": update_fields}

@@ -1,7 +1,7 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from bson import ObjectId
-from datetime import datetime
+from datetime import datetime, timezone
 
 from ..models import project_model
 from ..extensions import mongo
@@ -62,8 +62,8 @@ def create_project():
             "bookIds": [ObjectId(b) for b in book_ids],
             "chatHistoryId": ObjectId(chat_history_id) if chat_history_id else None,
             "createdBy": ObjectId(user_id),
-            "createdAt": datetime.utcnow(),
-            "updatedAt": datetime.utcnow(),
+            "createdAt": datetime.now(timezone.utc),
+            "updatedAt": datetime.now(timezone.utc),
         }
 
         project_id = project_model.create_project(mongo, project_data)
@@ -135,7 +135,7 @@ def update_project(project_id):
                 else:
                     update_fields[key] = data[key]
 
-        update_fields["updatedAt"] = datetime.utcnow()
+        update_fields["updatedAt"] = datetime.now(timezone.utc)
 
         success = project_model.update_project(mongo, project_id, update_fields)
         if success:

@@ -10,7 +10,7 @@ import traceback
 import logging
 import random
 import smtplib
-from datetime import datetime, timedelta
+from datetime import datetime, timezone
 
 
 # Configure logging
@@ -108,7 +108,7 @@ def update_user_status(user_id):
 
 
         # Update and verify directly with MongoDB
-        mongo.db.users.update_one({"_id": ObjectId(user_id)}, {"$set": {"isActive": is_active, "lastLogin":datetime.utcnow(), "loginAttempts":0}})
+        mongo.db.users.update_one({"_id": ObjectId(user_id)}, {"$set": {"isActive": is_active, "lastLogin":datetime.now(timezone.utc), "loginAttempts":0}})
         updated_user = mongo.db.users.find_one({"_id": ObjectId(user_id)})
         
         if not updated_user:
