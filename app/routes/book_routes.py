@@ -5,14 +5,12 @@ from bson import ObjectId
 from datetime import datetime, timezone
 import os
 
-from ..models import book_model
+from ..models import book_model, project_model
 from ..extensions import mongo
 from ..helpers.auth_helpers import role_required
 from ..models.user import UserRoles
 from ..helpers.file_helpers import allowed_file, create_pdf_preview
 from PyPDF2 import PdfReader
-from flask import current_app, url_for
-
 
 book_bp = Blueprint("books", __name__, url_prefix="/api/books")
 
@@ -32,21 +30,30 @@ def upload_books():
         if not files:
             return jsonify({"error": "No files selected"}), 400
 
+        # Get metadata arrays
+        book_names = request.form.getlist("bookName")
+        authors = request.form.getlist("author")
+        editions = request.form.getlist("edition")
+
+        # Validate metadata length matches files
+        if len(book_names) != len(files) or len(authors) != len(files):
+            return jsonify({"error": "Number of bookName/author entries must match number of files"}), 400
+
         os.makedirs(UPLOAD_DIR, exist_ok=True)
         user_id = get_jwt_identity()
         uploaded = []
 
-        for file in files:
+        for i, file in enumerate(files):
             if not allowed_file(file.filename):
                 continue
 
-            # Get metadata from form-data
-            book_name = request.form.get("bookName", "").strip().upper()
-            author = request.form.get("author", "").strip().upper()
-            edition = request.form.get("edition", "").strip().upper()
+            # Get metadata for this file
+            book_name = book_names[i].strip().upper()
+            author = authors[i].strip().upper()
+            edition = editions[i].strip().upper() if i < len(editions) else ""
 
             if not book_name or not author:
-                return jsonify({"error": "bookName and author are required"}), 400
+                return jsonify({"error": f"bookName and author are required for file {file.filename}"}), 400
 
             # Check for duplicate bookName
             existing = mongo.db.books.find_one({"bookName": book_name})
@@ -80,7 +87,7 @@ def upload_books():
                 "pages": pages,
                 "visibility": "private",
                 "frontPageImagePath": preview_filename,
-                "previewUrl": preview_rel_path,  # relative path
+                "previewUrl": preview_rel_path,
                 "ocrProcessId": None,
                 "createdBy": ObjectId(user_id),
                 "createdAt": datetime.now(timezone.utc),
@@ -107,11 +114,96 @@ def upload_books():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+# ---------- 2. Add Books to Project ----------
+@book_bp.route("/<project_id>/add", methods=["POST"])
+@jwt_required()
+@role_required([UserRoles.PM, UserRoles.BM])
+def add_books_to_project(project_id):
+    try:
+        if not ObjectId.is_valid(project_id):
+            return jsonify({"error": "Invalid project ID"}), 400
 
-# ---------- 3. Get All Books (Admin/BM/PM Only) ----------
+        user_id = ObjectId(get_jwt_identity())
+        project = project_model.get_project_by_id(mongo, project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+        if str(project.get("createdBy")) != str(user_id):
+            return jsonify({"error": "Unauthorized: Only the project creator can add books"}), 403
+
+        data = request.get_json()
+        book_ids = data.get("bookIds", [])
+
+        if not book_ids:
+            return jsonify({"error": "At least one book ID is required"}), 400
+
+        valid_book_ids = [ObjectId(bid) for bid in book_ids if ObjectId.is_valid(bid)]
+
+        # Update the project's bookIds
+        result = mongo.db["project-details"].update_one(
+            {"_id": ObjectId(project_id)},
+            {
+                "$addToSet": {
+                    "bookIds": {"$each": valid_book_ids}
+                },
+                "$set": {"updatedAt": datetime.now(timezone.utc)}
+            }
+        )
+
+        if result.modified_count > 0:
+            return jsonify({"message": "Books added to project"}), 200
+        else:
+            return jsonify({"error": "No changes made to the project"}), 400
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ---------- 3. Remove Books from Project ----------
+@book_bp.route("/<project_id>/remove", methods=["POST"])
+@jwt_required()
+@role_required([UserRoles.PM, UserRoles.BM])
+def remove_books_from_project(project_id):
+    try:
+        if not ObjectId.is_valid(project_id):
+            return jsonify({"error": "Invalid project ID"}), 400
+
+        user_id = ObjectId(get_jwt_identity())
+        project = project_model.get_project_by_id(mongo, project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+        if str(project.get("createdBy")) != str(user_id):
+            return jsonify({"error": "Unauthorized: Only the project creator can remove books"}), 403
+
+        data = request.get_json()
+        book_ids = data.get("bookIds", [])
+
+        if not book_ids:
+            return jsonify({"error": "At least one book ID is required"}), 400
+
+        valid_book_ids = [ObjectId(bid) for bid in book_ids if ObjectId.is_valid(bid)]
+
+        # Update the project's bookIds by removing specified books
+        result = mongo.db["project-details"].update_one(
+            {"_id": ObjectId(project_id)},
+            {
+                "$pull": {
+                    "bookIds": {"$in": valid_book_ids}
+                },
+                "$set": {"updatedAt": datetime.now(timezone.utc)}
+            }
+        )
+
+        if result.modified_count > 0:
+            return jsonify({"message": "Books removed from project"}), 200
+        else:
+            return jsonify({"error": "No changes made to the project"}), 400
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ---------- 4. Get All Books (Admin/BM/PM/User) ----------
 @book_bp.route("/", methods=["GET"])
 @jwt_required()
-@role_required([UserRoles.ADMIN, UserRoles.BM, UserRoles.PM, UserRoles.BM, UserRoles.USER])
+@role_required([UserRoles.ADMIN, UserRoles.BM, UserRoles.PM, UserRoles.USER])
 def get_all_books():
     try:
         books = book_model.get_all_books(mongo)
@@ -119,7 +211,26 @@ def get_all_books():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# ---------- 4. Delete Book ----------
+# ---------- 5. Get Books for a Project ----------
+@book_bp.route("/projects/<project_id>/books", methods=["GET"])
+@jwt_required()
+@role_required([UserRoles.ADMIN, UserRoles.BM, UserRoles.PM, UserRoles.USER])
+def get_project_books(project_id):
+    try:
+        if not ObjectId.is_valid(project_id):
+            return jsonify({"error": "Invalid project ID"}), 400
+
+        user_id = ObjectId(get_jwt_identity())
+        project = project_model.get_project_by_id(mongo, project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        books = book_model.get_books_by_project(mongo, project_id)
+        return jsonify({"books": books}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ---------- 6. Delete Book ----------
 @book_bp.route("/<book_id>", methods=["DELETE"])
 @jwt_required()
 @role_required([UserRoles.BM])
@@ -140,7 +251,8 @@ def delete_book(book_id):
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-# ---------- 5. Update Book Visibility ----------
+
+# ---------- 7. Update Book Visibility ----------
 @book_bp.route("/<book_id>/visibility", methods=["PATCH"])
 @jwt_required()
 @role_required([UserRoles.BM])

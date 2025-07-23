@@ -12,7 +12,6 @@ class UserRoles:
     def values(cls):
         return [cls.USER, cls.PM, cls.BM, cls.ADMIN]
 
-    
 class User:
     def __init__(self, user_data):
         self.user_data = user_data
@@ -34,9 +33,7 @@ class User:
             "isActive": False,  # default to False until admin activates
             "isLocked": False,
             "loginAttempts": 0,
-            "role": "user",  # string type role
-            "bio": "",
-            "status": "Available",
+            "role": "user",
             "avatar": None,
             "createdAt": datetime.now(timezone.utc),
             "updatedAt": datetime.now(timezone.utc),
@@ -44,7 +41,6 @@ class User:
         }
         result = mongo.db.users.insert_one(user_data)
         return str(result.inserted_id)
-
 
     @staticmethod
     def find_by_email(email):
@@ -58,6 +54,25 @@ class User:
             return None
 
     @staticmethod
+    def find_by_ids(user_ids):
+        try:
+            users = mongo.db.users.find({"_id": {"$in": [ObjectId(uid) for uid in user_ids]}})
+            return [
+                {
+                    "_id": str(user["_id"]),
+                    "fullName": user.get("fullName"),
+                    "email": user.get("email"),
+                    "role": user.get("role", "user"),
+                    "isActive": user.get("isActive", False),
+                    "isBlocked": user.get("isBlocked", False),
+                    "createdAt": user.get("createdAt")
+                }
+                for user in users
+            ]
+        except:
+            return []
+
+    @staticmethod
     def find_one_and_update(query, update, return_document=False):
         return mongo.db.users.find_one_and_update(
             query,
@@ -69,14 +84,14 @@ class User:
     def get_all_users():
         users = mongo.db.users.find()
         return [
-        {
-            "_id": str(user["_id"]),
-            "fullName": user.get("fullName"),
-            "email": user.get("email"),
-            "role": user.get("role", "user"),
-            "isActive": user.get("isActive", False),
-            "isBlocked": user.get("isBlocked", False),
-            "createdAt": user.get("createdAt")
-        }
+            {
+                "_id": str(user["_id"]),
+                "fullName": user.get("fullName"),
+                "email": user.get("email"),
+                "role": user.get("role", "user"),
+                "isActive": user.get("isActive", False),
+                "isBlocked": user.get("isBlocked", False),
+                "createdAt": user.get("createdAt")
+            }
             for user in users
         ]

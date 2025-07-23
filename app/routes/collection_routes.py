@@ -89,7 +89,8 @@ def add_collections_to_project(project_id):
             {
                 "$addToSet": {
                     "collectionIds": {"$each": valid_collection_ids}
-                }
+                },
+                "$set": {"updatedAt": datetime.now(timezone.utc)}
             }
         )
 
@@ -103,6 +104,73 @@ def add_collections_to_project(project_id):
         else:
             return jsonify({"error": "No changes made to the project"}), 400
 
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ---------- Remove Collections from Project ----------
+@collection_bp.route("/<project_id>/remove", methods=["POST"])
+@jwt_required()
+@role_required(ALLOWED_ROLES)
+def remove_collections_from_project(project_id):
+    try:
+        if not ObjectId.is_valid(project_id):
+            return jsonify({"error": "Invalid project ID"}), 400
+
+        user_id = ObjectId(get_jwt_identity())
+        project = project_model.get_project_by_id(mongo, project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+        if str(project.get("createdBy")) != str(user_id):
+            return jsonify({"error": "Unauthorized: Only the project creator can remove collections"}), 403
+
+        data = request.get_json()
+        collection_ids = data.get("collectionIds", [])
+
+        if not collection_ids:
+            return jsonify({"error": "At least one collection ID is required"}), 400
+
+        valid_collection_ids = [ObjectId(cid) for cid in collection_ids if ObjectId.is_valid(cid)]
+
+        # Update the project's collectionIds by removing specified collections
+        result = mongo.db["project-details"].update_one(
+            {"_id": ObjectId(project_id)},
+            {
+                "$pull": {
+                    "collectionIds": {"$in": valid_collection_ids}
+                },
+                "$set": {"updatedAt": datetime.now(timezone.utc)}
+            }
+        )
+
+        if result.modified_count > 0:
+            # Update collections to unset their projectId
+            mongo.db["collections"].update_many(
+                {"_id": {"$in": valid_collection_ids}},
+                {"$unset": {"projectId": ""}, "$set": {"updatedAt": datetime.now(timezone.utc)}}
+            )
+            return jsonify({"message": "Collections removed from project"}), 200
+        else:
+            return jsonify({"error": "No changes made to the project"}), 400
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# ---------- Get Collections for a Project ----------
+@collection_bp.route("/projects/<project_id>/collections", methods=["GET"])
+@jwt_required()
+@role_required(ALLOWED_ROLES)
+def get_project_collections(project_id):
+    try:
+        if not ObjectId.is_valid(project_id):
+            return jsonify({"error": "Invalid project ID"}), 400
+
+        user_id = ObjectId(get_jwt_identity())
+        project = project_model.get_project_by_id(mongo, project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        collections = collection_model.get_project_collections(mongo, project_id)
+        return jsonify({"collections": collections}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -141,7 +209,7 @@ def get_collection(collection_id):
             project_id = collection.get("projectId")
             if project_id:
                 project = project_model.get_project_by_id(mongo, str(project_id))
-                if not project or str(user_id) not in project.get("memberIds", []):
+                if not project or str(user_id) not in [str(mid) for mid in project.get("memberIds", [])]:
                     return jsonify({"error": "Access denied"}), 403
 
         return jsonify({"collection": collection}), 200

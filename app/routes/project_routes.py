@@ -109,7 +109,7 @@ def get_own_project(project_id):
 
 # ------------------ PATCH: Update Project ------------------
 @project_bp.route("/<project_id>", methods=["PATCH"])
-# @jwt_required()
+@jwt_required()
 @role_required([UserRoles.PM, UserRoles.BM])
 def update_project(project_id):
     try:

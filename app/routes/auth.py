@@ -144,28 +144,6 @@ def get_all_users():
         traceback.print_exc()
         return jsonify({"message": "Server error", "error": str(e)}), 500
 
-@bp.route("/uploads", methods=["GET"])
-@jwt_required()
-def get_all_uploads():
-    try:
-        uploads = mongo.db.uploads.find()
-        uploads_list = [
-            {
-                "_id": str(upload["_id"]),
-                "filename": upload.get("filename"),
-                "file_url": upload.get("file_url"),
-                "user_id": str(upload.get("user_id")),
-                "upload_time": upload.get("upload_time")
-            }
-            for upload in uploads
-        ]
-        logger.info(f"Returning uploads from /api/uploads: {uploads_list}")
-        return jsonify(uploads_list), 200
-    except Exception as e:
-        logger.error(f"Error fetching uploads: {str(e)}")
-        traceback.print_exc()
-        return jsonify({"message": "Server error", "error": str(e)}), 500
-
 @bp.route("/protected", methods=["GET"])
 @jwt_required()
 def protected():

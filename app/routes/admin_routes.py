@@ -1,12 +1,12 @@
 from flask import Blueprint, jsonify, request
-from flask_jwt_extended import jwt_required
+from flask_jwt_extended import jwt_required, get_jwt_identity
 from bson.objectid import ObjectId
 from datetime import datetime, timezone
 
 from ..extensions import mongo
 from ..models.user import User, UserRoles
 from ..helpers.auth_helpers import role_required
-
+from ..models import project_model
 
 import logging
 
@@ -26,8 +26,119 @@ def list_all_users():
         logger.error(f"Error fetching users: {str(e)}")
         return jsonify({"message": "Failed to fetch users"}), 500
 
+# Fetch members for a project
+@admin_bp.route("/projects/<project_id>/members", methods=["GET"])
+@jwt_required()
+@role_required([UserRoles.ADMIN, UserRoles.PM, UserRoles.BM, UserRoles.USER])
+def get_project_members(project_id):
+    try:
+        if not ObjectId.is_valid(project_id):
+            return jsonify({"error": "Invalid project ID"}), 400
 
-# -----------------------------------------------Activate/Deactivate User by Admin---------------------------------------------------
+        project = project_model.get_project_by_id(mongo, project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+
+        member_ids = project.get("memberIds", [])
+        if not member_ids:
+            return jsonify({"members": []}), 200
+
+        members = User.find_by_ids(member_ids)
+        return jsonify({"members": members}), 200
+
+    except Exception as e:
+        logger.error(f"Error fetching project members: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+# Add members to a project
+@admin_bp.route("/projects/<project_id>/members", methods=["POST"])
+@jwt_required()
+@role_required([UserRoles.PM, UserRoles.BM])
+def add_members_to_project(project_id):
+    try:
+        if not ObjectId.is_valid(project_id):
+            return jsonify({"error": "Invalid project ID"}), 400
+
+        user_id = ObjectId(get_jwt_identity())
+        project = project_model.get_project_by_id(mongo, project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+        if str(project.get("createdBy")) != str(user_id):
+            return jsonify({"error": "Unauthorized: Only the project creator can add members"}), 403
+
+        data = request.get_json()
+        member_ids = data.get("memberIds", [])
+
+        if not member_ids:
+            return jsonify({"error": "At least one member ID is required"}), 400
+
+        valid_member_ids = [ObjectId(mid) for mid in member_ids if ObjectId.is_valid(mid)]
+
+        # Update the project's memberIds
+        result = mongo.db["project-details"].update_one(
+            {"_id": ObjectId(project_id)},
+            {
+                "$addToSet": {
+                    "memberIds": {"$each": valid_member_ids}
+                },
+                "$set": {"updatedAt": datetime.now(timezone.utc)}
+            }
+        )
+
+        if result.modified_count > 0:
+            return jsonify({"message": "Members added to project"}), 200
+        else:
+            return jsonify({"error": "No changes made to the project"}), 400
+
+    except Exception as e:
+        logger.error(f"Error adding members to project: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+# Remove members from a project
+@admin_bp.route("/projects/<project_id>/members/remove", methods=["POST"])
+@jwt_required()
+@role_required([UserRoles.PM, UserRoles.BM])
+def remove_members_from_project(project_id):
+    try:
+        if not ObjectId.is_valid(project_id):
+            return jsonify({"error": "Invalid project ID"}), 400
+
+        user_id = ObjectId(get_jwt_identity())
+        project = project_model.get_project_by_id(mongo, project_id)
+        if not project:
+            return jsonify({"error": "Project not found"}), 404
+        if str(project.get("createdBy")) != str(user_id):
+            return jsonify({"error": "Unauthorized: Only the project creator can remove members"}), 403
+
+        data = request.get_json()
+        member_ids = data.get("memberIds", [])
+
+        if not member_ids:
+            return jsonify({"error": "At least one member ID is required"}), 400
+
+        valid_member_ids = [ObjectId(mid) for mid in member_ids if ObjectId.is_valid(mid)]
+
+        # Update the project's memberIds by removing specified members
+        result = mongo.db["project-details"].update_one(
+            {"_id": ObjectId(project_id)},
+            {
+                "$pull": {
+                    "memberIds": {"$in": valid_member_ids}
+                },
+                "$set": {"updatedAt": datetime.now(timezone.utc)}
+            }
+        )
+
+        if result.modified_count > 0:
+            return jsonify({"message": "Members removed from project"}), 200
+        else:
+            return jsonify({"error": "No changes made to the project"}), 400
+
+    except Exception as e:
+        logger.error(f"Error removing members from project: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+# Activate/Deactivate User by Admin
 @admin_bp.route("/users/<user_id>", methods=["PATCH"])
 @jwt_required()
 @role_required([UserRoles.ADMIN])
@@ -81,9 +192,7 @@ def toggle_user_status(user_id):
         logger.error(f"Error updating user status: {str(e)}")
         return jsonify({"message": "Server error", "error": str(e)}), 500
 
-# ---------------------------------------------------------------Change Roles------------------------------------------------
-
-
+# Change User Role
 @admin_bp.route("/users/<user_id>/role", methods=["PATCH"])
 @jwt_required()
 @role_required([UserRoles.ADMIN])
@@ -105,7 +214,7 @@ def update_user_role(user_id):
         if not user:
             return jsonify({"message": "User not found"}), 404
 
-        if user.get("role") == [UserRoles.ADMIN]:
+        if user.get("role") == UserRoles.ADMIN:
             return jsonify({"message": "Cannot change role of another admin"}), 403
 
         mongo.db.users.update_one(

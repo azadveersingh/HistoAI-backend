@@ -19,7 +19,7 @@ load_dotenv()
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..","uploads"))
 API_BASE_URL = os.getenv("BASE_URL")
-print("API_BASE_URL", API_BASE_URL)
+# print("API_BASE_URL", API_BASE_URL)
 
 
 @bp.route("/excel-data/<book_id>", methods=["GET"])
