@@ -1,27 +1,59 @@
-# === IDE & Editor Files ===
-.vscode/
-.idea/
-*.iml
-
-# === GENERAL PROJECT IGNORE ===
-.env
-.env.local
-.env.*.local
-.DS_Store
-Thumbs.db
-logs/
-*.log
-
-# ===  (Flask) ===
-__pycache__/  
-env/
+# Python cache
+__pycache__/
 *.pyc
 *.pyo
-*.db
+*.pyd
+
+# Virtual environment
+venv/
+env/
+
+# Environment files
 .env
-.env.local
-.env.*.local
+.flaskenv
+
+# Logs
+*.log
+flask.log
+
+# IDE / Editor settings
+.vscode/
+.idea/
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Flask instance folder
 instance/
-logs/
-app/uploads/ 
-readme.md
+
+# Uploads (user-generated content)
+uploads/
+app/uploads/
+
+# Static assets generated dynamically
+app/static/assets/
+
+# Templates cache
+*.html~
+
+# Database files
+*.sqlite3
+*.db
+
+# Distribution / packaging
+*.egg-info/
+build/
+dist/
+
+# Backup and swap files
+*.bak
+*.swp
+*.swo
+
+# Markdown or local documentation
+folder_structure.md
+
+# Celery worker PID and schedule files
+celerybeat-schedule
+celerybeat.pid
