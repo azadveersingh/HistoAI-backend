@@ -4,24 +4,24 @@
 *.iml
 
 # === GENERAL PROJECT IGNORE ===
-/.env
-/.env.local
-/.env.*.local
-/.DS_Store
-/Thumbs.db
-/logs/
-/*.log
+.env
+.env.local
+.env.*.local
+.DS_Store
+Thumbs.db
+logs/
+*.log
 
 # ===  (Flask) ===
-/**/__pycache__/  
-/env/
-/*.pyc
-/*.pyo
-/*.db
-/.env
-/.env.local
-/.env.*.local
-/instance/
-/logs/
-/app/uploads/ 
-/readme.md
+__pycache__/  
+env/
+*.pyc
+*.pyo
+*.db
+.env
+.env.local
+.env.*.local
+instance/
+logs/
+app/uploads/ 
+readme.md
