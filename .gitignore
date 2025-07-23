@@ -31,9 +31,6 @@ instance/
 uploads/
 app/uploads/
 
-# Static assets generated dynamically
-app/static/assets/
-
 # Templates cache
 *.html~
 
