@@ -30,6 +30,7 @@ def upload_books():
         if not files:
             return jsonify({"error": "No files selected"}), 400
 
+
         # Get metadata arrays
         book_names = request.form.getlist("bookName")
         authors = request.form.getlist("author")
