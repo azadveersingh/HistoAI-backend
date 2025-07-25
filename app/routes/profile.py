@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
-API_BASE_URL = os.getenv("BASE_URL", "http://192.168.1.58:5000")  # Fallback to correct host
+API_BASE_URL = os.getenv("BASE_URL", "http://192.168.1.54:5000")  # Fallback to correct host
 logger = logging.getLogger(__name__)
 logger.debug(f"Base URL for Profile: {API_BASE_URL}")
 
