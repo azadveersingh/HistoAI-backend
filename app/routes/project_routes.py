@@ -1,3 +1,4 @@
+
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from bson import ObjectId
@@ -18,10 +19,9 @@ def fetch_projects():
     try:
         projects = project_model.get_all_projects(mongo)
         print(f"all Project{projects}")
-        return jsonify({"projects":projects}), 200
+        return jsonify({"projects": projects}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 # ------------------ GET: Project by ID ------------------
 @project_bp.route("/<project_id>", methods=["GET"])
@@ -36,7 +36,6 @@ def get_project(project_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
 # ------------------ POST: Create Project ------------------
 @project_bp.route("", methods=["POST"])
 @jwt_required()
@@ -47,7 +46,7 @@ def create_project():
         data = request.get_json()
 
         name = data.get("name")
-        # member_ids = data.get("memberIds", [])
+        member_ids = data.get("memberIds", [])  # Handle memberIds
         collection_ids = data.get("collectionIds", [])
         book_ids = data.get("bookIds", [])
         chat_history_id = data.get("chatHistoryId")
@@ -55,12 +54,19 @@ def create_project():
         if not name:
             return jsonify({"error": "Project name is required"}), 400
 
+        # Validate memberIds
+        valid_member_ids = []
+        for mid in member_ids:
+            if not ObjectId.is_valid(mid):
+                return jsonify({"error": f"Invalid member ID: {mid}"}), 400
+            valid_member_ids.append(ObjectId(mid))
+
         project_data = {
             "name": name,
-            # "memberIds": [ObjectId(m) for m in member_ids],
-            "collectionIds": [ObjectId(c) for c in collection_ids],
-            "bookIds": [ObjectId(b) for b in book_ids],
-            "chatHistoryId": ObjectId(chat_history_id) if chat_history_id else None,
+            "memberIds": valid_member_ids,  # Store memberIds
+            "collectionIds": [ObjectId(c) for c in collection_ids if ObjectId.is_valid(c)],
+            "bookIds": [ObjectId(b) for b in book_ids if ObjectId.is_valid(b)],
+            "chatHistoryId": ObjectId(chat_history_id) if chat_history_id and ObjectId.is_valid(chat_history_id) else None,
             "createdBy": ObjectId(user_id),
             "createdAt": datetime.now(timezone.utc),
             "updatedAt": datetime.now(timezone.utc),
@@ -71,8 +77,6 @@ def create_project():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-from flask import Blueprint, jsonify, request
 
 # ------------------ GET: Projects for Current User ------------------
 @project_bp.route("/my", methods=["GET"])
@@ -85,7 +89,6 @@ def get_my_projects():
         return jsonify({"projects": projects}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 # ------------------ GET: Project by ID (own only) ------------------
 @project_bp.route("/my/<project_id>", methods=["GET"])
@@ -106,7 +109,6 @@ def get_own_project(project_id):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
 # ------------------ PATCH: Update Project ------------------
 @project_bp.route("/<project_id>", methods=["PATCH"])
 @jwt_required()
@@ -124,14 +126,14 @@ def update_project(project_id):
         
         data = request.get_json()
         update_fields = {}
-        allowed_fields = ["name", "collectionIds", "bookIds", "chatHistoryId"]
+        allowed_fields = ["name", "collectionIds", "bookIds", "chatHistoryId", "memberIds"]  # Added memberIds
 
         for key in allowed_fields:
             if key in data:
-                if key in ["collectionIds", "bookIds"]:
-                    update_fields[key] = [ObjectId(i) for i in data[key]]
+                if key in ["collectionIds", "bookIds", "memberIds"]:
+                    update_fields[key] = [ObjectId(i) for i in data[key] if ObjectId.is_valid(i)]
                 elif key == "chatHistoryId":
-                    update_fields[key] = ObjectId(data[key])
+                    update_fields[key] = ObjectId(data[key]) if data[key] and ObjectId.is_valid(data[key]) else None
                 else:
                     update_fields[key] = data[key]
 
@@ -144,7 +146,6 @@ def update_project(project_id):
             return jsonify({"error": "Project not found"}), 404
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
 
 # ------------------ DELETE: Delete Project ------------------
 @project_bp.route("/<project_id>", methods=["DELETE"])

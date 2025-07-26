@@ -12,6 +12,7 @@ def serialize_book(book):
         "fileName": book.get("fileName"),
         "bookName": book.get("bookName"),
         "author": book.get("author"),
+        "author2": book.get("author2", ""),  # Default to empty string if not present
         "edition": book.get("edition"),
         "fileSize": book.get("fileSize"),
         "pages": book.get("pages"),
@@ -74,6 +75,7 @@ def get_book_details_for_email(mongo, book_id, deletion_time):
     return {
         "bookName": book.get("bookName", "Untitled"),
         "author": book.get("author", "Unknown"),
+        "author2": book.get("author2", "N/A"),  # Default to "N/A" for email if not present
         "edition": book.get("edition", "N/A"),
         "uploaderName": uploader.get("fullName", "Unknown") if uploader else "Unknown",
         "deletionTime": deletion_time
