@@ -206,14 +206,16 @@ def get_collection(collection_id):
 
         # Authorization: allow if creator or project member
         if str(collection["createdBy"]) != str(user_id):
-            project_id = collection.get("projectId")
-            if project_id:
-                project = project_model.get_project_by_id(mongo, str(project_id))
-                if not project or str(user_id) not in [str(mid) for mid in project.get("memberIds", [])]:
+            project_ids = [ObjectId(pid) for pid in collection.get("projectIds", [])]
+            if project_ids:
+                project = mongo.db[PROJECT_COLLECTION].find_one({
+                    "_id": {"$in": project_ids},
+                    "memberIds": user_id
+                })
+                if not project:
                     return jsonify({"error": "Access denied"}), 403
 
         return jsonify({"collection": collection}), 200
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -235,39 +237,39 @@ def update_collection(collection_id):
             return jsonify({"error": "Only the creator can update this collection"}), 403
 
         data = request.get_json()
+        print(f"Update collection data: {data}")
         update_fields = {}
 
-        # Update collection name
         if "name" in data:
             update_fields["name"] = data["name"].strip()
 
-        # Handle full bookIds replacement
         if "bookIds" in data:
             update_fields["bookIds"] = [
                 ObjectId(bid) for bid in data["bookIds"] if ObjectId.is_valid(bid)
             ]
 
-        # Add books to collection
         if "addBookIds" in data:
             add_ids = [ObjectId(bid) for bid in data["addBookIds"] if ObjectId.is_valid(bid)]
-            current_books = collection.get("bookIds", [])
+            current_books = [ObjectId(bid) for bid in collection.get("bookIds", []) if ObjectId.is_valid(bid)]
             update_fields["bookIds"] = list(set(current_books + add_ids))
 
-        # Remove books from collection
         if "removeBookIds" in data:
-            remove_ids = set(ObjectId(bid) for bid in data["removeBookIds"] if ObjectId.is_valid(bid))
-            current_books = collection.get("bookIds", [])
-            update_fields["bookIds"] = [bid for bid in current_books if bid not in remove_ids]
+            remove_ids = set(data["removeBookIds"])  # Keep as strings for comparison
+            current_books = collection.get("bookIds", [])  # Already strings from serialize_collection
+            update_fields["bookIds"] = [ObjectId(bid) for bid in current_books if bid not in remove_ids and ObjectId.is_valid(bid)]
+            print(f"Removing book IDs: {remove_ids}, New bookIds: {update_fields['bookIds']}")
 
         update_fields["updatedAt"] = datetime.now(timezone.utc)
 
         success = collection_model.update_collection(mongo, collection_id, update_fields)
+        print(f"Update result: modified_count={success}")
         if success:
             return jsonify({"message": "Collection updated"}), 200
         else:
-            return jsonify({"error": "Update failed"}), 500
+            return jsonify({"error": "Update failed, no changes made"}), 500
 
     except Exception as e:
+        print(f"Error in update_collection: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 # ---------- Delete Collection (Only Creator) ----------

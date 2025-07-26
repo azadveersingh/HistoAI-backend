@@ -36,9 +36,10 @@ def send_deletion_email(recipients, book_details_list, deleter_name, deleter_rol
         ist_time = deletion_time + timedelta(hours=5, minutes=30)
         deletion_str = ist_time.strftime("%A, %B %d, %Y, at %I:%M %p IST")
         
-        # Generate HTML list of books
+        # Generate HTML list of books with optional second author
         book_list_items = "".join(
-            f"<li style='margin-bottom: 10px; color: #FF0000;'>Book: {book['bookName']}, Author: {book['author']}, Edition: {book['edition']}, Uploaded by: {book['uploaderName']}</li>"
+            f"<li style='margin-bottom: 10px; color: #FF0000;'>Book: {book['bookName']}, Author: {book['author']}"
+            f"{', Co-Author: ' + book['author2'] if book['author2'] != 'N/A' else ''}, Edition: {book['edition']}, Uploaded by: {book['uploaderName']}</li>"
             for book in book_details_list
         )
 
@@ -47,7 +48,7 @@ def send_deletion_email(recipients, book_details_list, deleter_name, deleter_rol
         <body style="font-family: Arial, sans-serif; background-color: #f4f4f4; padding: 30px; margin: 0;">
             <div style="max-width: 600px; margin: auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); overflow: hidden;">
                 <div style="background-color: #003366; padding: 20px; text-align: center;">
-                    <img src="https://raw.githubusercontent.com/Coding-with-Gaurav/KTB-LLM-web/refs/heads/main/graphiti1.png" alt="Graphiti Multimedia Logo" style="max-height: 50px; display: block; margin: auto;" />
+                    <img src="https://raw.githubusercontent.com/Coding-with-Gaurav/KTB-LLM-web/refs/heads/main/graphiti1.png" alt="HistoAI Logo" style="max-height: 50px; display: block; margin: auto;" />
                     <h2 style="color: white; margin: 10px 0 0; font-size: 24px;">Book Deletion Notification</h2>
                 </div>
                 <div style="padding: 30px; color: #333; font-size: 16px; line-height: 1.6;">
@@ -56,10 +57,10 @@ def send_deletion_email(recipients, book_details_list, deleter_name, deleter_rol
                     <ul style="list-style-type: disc; padding-left: 20px; margin: 0 0 15px;">
                         {book_list_items}
                     </ul>
-                    <p style="margin: 0;">Regards,<br><strong>Graphiti Multimedia</strong></p>
+                    <p style="margin: 0;">Regards,<br><strong>HistoAI</strong></p>
                 </div>
                 <div style="background-color: #f1f1f1; text-align: center; padding: 15px; font-size: 12px; color: #777;">
-                    © {datetime.now(timezone.utc).year} Graphiti Multimedia. All rights reserved.
+                    © {datetime.now(timezone.utc).year} HistoAI. All rights reserved.
                 </div>
             </div>
         </body>
@@ -104,10 +105,12 @@ def upload_books():
 
         book_names = request.form.getlist("bookName")
         authors = request.form.getlist("author")
+        authors2 = request.form.getlist("author2")  # Optional second author
         editions = request.form.getlist("edition")
 
+        # Validate that bookName and primary author match the number of files
         if len(book_names) != len(files) or len(authors) != len(files):
-            return jsonify({"error": "Number of bookName/author entries must match number of files"}), 400
+            return jsonify({"error": "Number of bookName and primary author entries must match number of files"}), 400
 
         os.makedirs(UPLOAD_DIR, exist_ok=True)
         user_id = get_jwt_identity()
@@ -119,10 +122,11 @@ def upload_books():
 
             book_name = book_names[i].strip().upper()
             author = authors[i].strip().upper()
+            author2 = authors2[i].strip().upper() if i < len(authors2) and authors2[i].strip() else ""  # Optional second author
             edition = editions[i].strip().upper() if i < len(editions) else ""
 
             if not book_name or not author:
-                return jsonify({"error": f"bookName and author are required for file {file.filename}"}), 400
+                return jsonify({"error": f"bookName and primary author are required for file {file.filename}"}), 400
 
             existing = mongo.db.books.find_one({"bookName": book_name})
             if existing:
@@ -146,6 +150,7 @@ def upload_books():
                 "fileName": filename,
                 "bookName": book_name,
                 "author": author,
+                "author2": author2,  # Optional second author
                 "edition": edition,
                 "fileSize": os.path.getsize(filepath),
                 "pages": pages,
@@ -167,6 +172,7 @@ def upload_books():
                 "fileName": filename,
                 "bookName": book_name,
                 "author": author,
+                "author2": author2,
                 "edition": edition,
                 "pages": pages,
                 "previewUrl": f"/{preview_rel_path}"
@@ -176,6 +182,58 @@ def upload_books():
             "message": "Books uploaded and OCR processes started",
             "files": uploaded
         }), 201
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@book_bp.route("/<book_id>/update", methods=["PATCH"])
+@jwt_required()
+@role_required([UserRoles.BM])
+def update_book_details(book_id):
+    try:
+        if not ObjectId.is_valid(book_id):
+            return jsonify({"error": "Invalid book ID"}), 400
+
+        user_id = ObjectId(get_jwt_identity())
+        book = book_model.get_book_by_id(mongo, book_id)
+        if not book:
+            return jsonify({"error": "Book not found"}), 404
+        if str(book.get("createdBy")) != str(user_id):
+            return jsonify({"error": "Unauthorized: Only the book uploader can update details"}), 403
+
+        data = request.get_json()
+        update_fields = {}
+
+        # Validate and add bookName if provided
+        if "bookName" in data and data["bookName"].strip():
+            book_name = data["bookName"].strip().upper()
+            existing = mongo.db.books.find_one({"bookName": book_name, "_id": {"$ne": ObjectId(book_id)}})
+            if existing:
+                return jsonify({"error": f"Book name '{book_name}' already exists"}), 409
+            update_fields["bookName"] = book_name
+
+        # Validate and add primary author (mandatory if provided)
+        if "author" in data:
+            if not data["author"].strip():
+                return jsonify({"error": "Primary author cannot be empty"}), 400
+            update_fields["author"] = data["author"].strip().upper()
+
+        # Add second author (optional)
+        if "author2" in data:
+            update_fields["author2"] = data["author2"].strip().upper() if data["author2"].strip() else ""
+
+        # Validate and add edition if provided
+        if "edition" in data:
+            update_fields["edition"] = data["edition"].strip().upper() if data["edition"].strip() else ""
+
+        if not update_fields:
+            return jsonify({"error": "No valid fields provided for update"}), 400
+
+        success = book_model.update_book(mongo, book_id, update_fields)
+        if success:
+            return jsonify({"message": "Book details updated successfully"}), 200
+        else:
+            return jsonify({"error": "Failed to update book details"}), 500
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
