@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import random
 import smtplib
 import os
@@ -121,11 +121,16 @@ def verify_register_otp():
     if not user:
         return jsonify({"message": "User not found"}), 404
 
+    otp_expiry = user.get("otpExpiry")
+    if otp_expiry.tzinfo is None:
+        otp_expiry = otp_expiry.replace(tzinfo=timezone.utc)
+
     if (
         user.get("otpCode") != otp_input or
-        user.get("otpExpiry") < datetime.now(timezone.utc)
+        otp_expiry < datetime.now(timezone.utc)
     ):
         return jsonify({"message": "Invalid or expired OTP"}), 401
+        
 
     mongo.db.users.update_one(
         {"_id": user["_id"]},
