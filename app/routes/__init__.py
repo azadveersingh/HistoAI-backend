@@ -14,6 +14,7 @@ def register_blueprints(app):
     from .admin_routes import admin_bp
     from .book_routes import book_bp
     from .collection_routes import collection_bp
+    from .file_serve_routes import file_serve_bp
     
 
   
@@ -31,4 +32,5 @@ def register_blueprints(app):
     app.register_blueprint(admin_bp)
     app.register_blueprint(book_bp)
     app.register_blueprint(collection_bp)
+    app.register_blueprint(file_serve_bp)
 

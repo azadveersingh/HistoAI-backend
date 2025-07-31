@@ -11,7 +11,8 @@ from ..models.user import User, UserRoles
 from ..models import book_model, project_model, ocr_model
 from ..extensions import mongo
 from ..helpers.auth_helpers import role_required
-from ..helpers.file_helpers import allowed_file, create_pdf_preview
+from ..helpers.file_helpers import allowed_file, create_pdf_preview, create_book_folder_structure
+from ..config import Config
 from PyPDF2 import PdfReader
 
 # Load email config from .env
@@ -24,7 +25,6 @@ EMAIL_PASS = os.getenv("EMAIL_PASS")
 book_bp = Blueprint("books", __name__, url_prefix="/api/books")
 
 MAX_TOTAL_UPLOAD_MB = 150
-UPLOAD_DIR = "Uploads/books"
 
 def send_deletion_email(recipients, book_details_list, deleter_name, deleter_role, deletion_time):
     try:
@@ -112,7 +112,6 @@ def upload_books():
         if len(book_names) != len(files) or len(authors) != len(files):
             return jsonify({"error": "Number of bookName and primary author entries must match number of files"}), 400
 
-        os.makedirs(UPLOAD_DIR, exist_ok=True)
         user_id = get_jwt_identity()
         uploaded = []
 
@@ -132,8 +131,22 @@ def upload_books():
             if existing:
                 return jsonify({"error": f"Book name '{book_name}' already exists"}), 409
 
+            # Create book-specific folder
+            book_doc = {
+                "bookName": book_name,
+                "author": author,
+                "author2": author2,
+                "edition": edition,
+                "createdBy": ObjectId(user_id),
+                "createdAt": datetime.now(timezone.utc),
+                "updatedAt": datetime.now(timezone.utc)
+            }
+            inserted_id = book_model.create_book(mongo, book_doc)
+            book_dir = create_book_folder_structure(inserted_id)
+
+            # Save file to book-specific folder
             filename = secure_filename(file.filename)
-            filepath = os.path.join(UPLOAD_DIR, filename)
+            filepath = os.path.join(book_dir, filename)
             file.save(filepath)
 
             try:
@@ -143,27 +156,22 @@ def upload_books():
             except Exception:
                 pages = 0
 
-            preview_filename = create_pdf_preview(filepath)
-            preview_rel_path = os.path.join("uploads/books", preview_filename)
+            # Generate preview with same name as file (with .jpg extension)
+            preview_filename = create_pdf_preview(inserted_id, filepath)
+            preview_rel_path = os.path.join(inserted_id, filename)
 
-            book_doc = {
+            # Update book document with file details
+            book_doc_update = {
                 "fileName": filename,
-                "bookName": book_name,
-                "author": author,
-                "author2": author2,  # Optional second author
-                "edition": edition,
                 "fileSize": os.path.getsize(filepath),
                 "pages": pages,
-                "visibility": "private",  # Always private initially
+                "visibility": "private",
                 "frontPageImagePath": preview_filename,
                 "previewUrl": preview_rel_path,
-                "ocrProcessId": None,  # Will be updated after OCR process creation
-                "createdBy": ObjectId(user_id),
-                "createdAt": datetime.now(timezone.utc),
-                "updatedAt": datetime.now(timezone.utc)
+                "ocrProcessId": None
             }
+            book_model.update_book(mongo, inserted_id, book_doc_update)
 
-            inserted_id = book_model.create_book(mongo, book_doc)
             ocr_process_id = ocr_model.create_ocr_process(mongo, inserted_id)
             book_model.update_book(mongo, inserted_id, {"ocrProcessId": ObjectId(ocr_process_id)})
 

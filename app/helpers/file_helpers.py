@@ -3,23 +3,37 @@ from werkzeug.utils import secure_filename
 from flask import current_app
 import fitz
 from PIL import Image
+from ..config import Config
 
 def allowed_file(filename):
     return "." in filename and \
            filename.rsplit(".", 1)[1].lower() in current_app.config["ALLOWED_EXTENSIONS"]
 
-def create_pdf_preview(file_path):
+def create_book_folder_structure(book_id):
+    """Create the folder structure for a book."""
+    book_dir = os.path.join(Config.BOOK_UPLOAD_DIR, book_id)
+    subdirs = [
+        os.path.join(book_dir, "Data Extraction"),
+        os.path.join(book_dir, "Chatbot"),
+        os.path.join(book_dir, "Knowledge Graph")
+    ]
+    for directory in [book_dir] + subdirs:
+        os.makedirs(directory, exist_ok=True)
+    return book_dir
+
+def create_pdf_preview(book_id, file_path):
     """
     Creates a preview image from the first page of a PDF
-    Returns the preview filename
+    Returns the relative path of the preview image (e.g., <book_id>/<sanitized_filename>.jpg)
     """
     filename = os.path.basename(file_path)
-    preview_filename = f"{filename.rsplit('.', 1)[0]}.jpg"
-    preview_path = os.path.join(os.path.dirname(file_path), preview_filename)
+    preview_filename = f"{os.path.splitext(filename)[0]}.jpg"
+    book_dir = os.path.join(Config.BOOK_UPLOAD_DIR, book_id)
+    preview_path = os.path.join(book_dir, preview_filename)
 
     try:
         doc = fitz.open(file_path)
-        page = doc[0]  # Get first page
+        page = doc[0]
         pix = page.get_pixmap()
         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
         img.save(preview_path, "JPEG")
@@ -28,4 +42,4 @@ def create_pdf_preview(file_path):
         print(f"Failed to create preview: {e}")
         raise
 
-    return preview_filename
+    return f"{book_id}/{preview_filename}"
