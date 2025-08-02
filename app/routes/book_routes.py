@@ -1,4 +1,4 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, send_file
 from flask_jwt_extended import jwt_required, get_jwt_identity
 from werkzeug.utils import secure_filename
 from bson import ObjectId
@@ -13,7 +13,12 @@ from ..extensions import mongo
 from ..helpers.auth_helpers import role_required
 from ..helpers.file_helpers import allowed_file, create_pdf_preview, create_book_folder_structure
 from ..config import Config
+from .ocr_processor import process_book_ocr
 from PyPDF2 import PdfReader
+import logging 
+
+logging.basicConfig(level=logging.ERROR)
+logger = logging.getLogger(__name__)
 
 # Load email config from .env
 load_dotenv()
@@ -105,7 +110,7 @@ def upload_books():
 
         book_names = request.form.getlist("bookName")
         authors = request.form.getlist("author")
-        authors2 = request.form.getlist("author2")  # Optional second author
+        authors2 = request.form.getlist("author2")
         editions = request.form.getlist("edition")
 
         # Validate that bookName and primary author match the number of files
@@ -121,7 +126,7 @@ def upload_books():
 
             book_name = book_names[i].strip().upper()
             author = authors[i].strip().upper()
-            author2 = authors2[i].strip().upper() if i < len(authors2) and authors2[i].strip() else ""  # Optional second author
+            author2 = authors2[i].strip().upper() if i < len(authors2) and authors2[i].strip() else ""
             edition = editions[i].strip().upper() if i < len(editions) else ""
 
             if not book_name or not author:
@@ -160,7 +165,15 @@ def upload_books():
             preview_filename = create_pdf_preview(inserted_id, filepath)
             preview_rel_path = os.path.join(inserted_id, filename)
 
-            # Update book document with file details
+            # Create OCR process
+            ocr_process_id = ocr_model.create_ocr_process(mongo, inserted_id)
+
+            # Run OCR processing
+            ocr_success, ocr_message = process_book_ocr(str(inserted_id), filepath)
+            if not ocr_success:
+                print(f"OCR failed for book {inserted_id}: {ocr_message}")
+
+            # Update book document with file details and OCR process ID
             book_doc_update = {
                 "fileName": filename,
                 "fileSize": os.path.getsize(filepath),
@@ -168,12 +181,9 @@ def upload_books():
                 "visibility": "private",
                 "frontPageImagePath": preview_filename,
                 "previewUrl": preview_rel_path,
-                "ocrProcessId": None
+                "ocrProcessId": ObjectId(ocr_process_id)
             }
             book_model.update_book(mongo, inserted_id, book_doc_update)
-
-            ocr_process_id = ocr_model.create_ocr_process(mongo, inserted_id)
-            book_model.update_book(mongo, inserted_id, {"ocrProcessId": ObjectId(ocr_process_id)})
 
             uploaded.append({
                 "bookId": inserted_id,
@@ -183,7 +193,9 @@ def upload_books():
                 "author2": author2,
                 "edition": edition,
                 "pages": pages,
-                "previewUrl": f"/{preview_rel_path}"
+                "previewUrl": f"/{preview_rel_path}",
+                "ocrStatus": "completed" if ocr_success else "failed",
+                "ocrMessage": ocr_message
             })
 
         return jsonify({
@@ -212,7 +224,6 @@ def update_book_details(book_id):
         data = request.get_json()
         update_fields = {}
 
-        # Validate and add bookName if provided
         if "bookName" in data and data["bookName"].strip():
             book_name = data["bookName"].strip().upper()
             existing = mongo.db.books.find_one({"bookName": book_name, "_id": {"$ne": ObjectId(book_id)}})
@@ -220,17 +231,14 @@ def update_book_details(book_id):
                 return jsonify({"error": f"Book name '{book_name}' already exists"}), 409
             update_fields["bookName"] = book_name
 
-        # Validate and add primary author (mandatory if provided)
         if "author" in data:
             if not data["author"].strip():
                 return jsonify({"error": "Primary author cannot be empty"}), 400
             update_fields["author"] = data["author"].strip().upper()
 
-        # Add second author (optional)
         if "author2" in data:
             update_fields["author2"] = data["author2"].strip().upper() if data["author2"].strip() else ""
 
-        # Validate and add edition if provided
         if "edition" in data:
             update_fields["edition"] = data["edition"].strip().upper() if data["edition"].strip() else ""
 
@@ -242,9 +250,10 @@ def update_book_details(book_id):
             return jsonify({"message": "Book details updated successfully"}), 200
         else:
             return jsonify({"error": "Failed to update book details"}), 500
-
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.error(f"Error in update_book_details for book_id {book_id}: {str(e)}")
+        return jsonify({"error": f"Failed to update book details: {str(e)}"}), 500
+    
 
 @book_bp.route("/<book_id>/ocr/complete", methods=["POST"])
 @jwt_required()
@@ -394,7 +403,8 @@ def get_processing_books():
                     processing_books.append(book)
         return jsonify({"books": processing_books}), 200
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.error(f"Error in get_processing_books: {str(e)}")
+        return jsonify({"error": f"Failed to fetch processing books: {str(e)}"}), 500
 
 @book_bp.route("/projects/<project_id>/books", methods=["GET"])
 @jwt_required()
@@ -603,7 +613,6 @@ def update_book_visibility(book_id):
         if new_visibility not in ["private", "public"]:
             return jsonify({"error": "Invalid visibility. Use 'private' or 'public'"}), 400
 
-        # Check if OCR process is completed before allowing public visibility
         if new_visibility == "public":
             ocr_process = ocr_model.get_ocr_process_by_book(mongo, book_id)
             if not ocr_process or ocr_process["status"] != "completed":
@@ -615,6 +624,39 @@ def update_book_visibility(book_id):
             return jsonify({"message": f"Book visibility updated to '{new_visibility}'"}), 200
         else:
             return jsonify({"error": "Failed to update visibility"}), 500
-
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        logger.error(f"Error in update_book_visibility for book_id {book_id}: {str(e)}")
+        return jsonify({"error": f"Failed to update visibility: {str(e)}"}), 500
+
+
+@book_bp.route("/<book_id>/ocr/text", methods=["GET"])
+@jwt_required()
+@role_required([UserRoles.ADMIN, UserRoles.BM, UserRoles.PM, UserRoles.USER])
+def download_ocr_text(book_id):
+    try:
+        if not ObjectId.is_valid(book_id):
+            return jsonify({"error": "Invalid book ID"}), 400
+
+        ocr_process = ocr_model.get_ocr_process_by_book(mongo, book_id)
+        if not ocr_process:
+            return jsonify({"error": "OCR process not found for this book"}), 404
+
+        if ocr_process["status"] != "completed":
+            return jsonify({"error": "OCR process is not completed"}), 400
+
+        text_file_path = ocr_process.get("ocrTextFilePath")
+        if not text_file_path or not os.path.exists(text_file_path):
+            return jsonify({"error": "OCR text file not found"}), 404
+
+        # Redirect to the file serving route
+        filename = os.path.join(book_id, "OCR_OUTPUT.TXT")
+        return send_file(
+            text_file_path,
+            as_attachment=True,
+            download_name=f"{book_id}_OCR.txt",
+            mimetype="text/plain"
+        )
+    except Exception as e:
+        logger.error(f"Error in download_ocr_text for book_id {book_id}: {str(e)}")
+        return jsonify({"error": f"Failed to download OCR text: {str(e)}"}), 500
+

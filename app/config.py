@@ -3,7 +3,7 @@ from datetime import timedelta
 
 
 class Config:
-    MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/ktb")
+    MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017/HistoAI")
     JWT_SECRET_KEY = os.getenv("keepsecure", "NOTHINGISECURE")
     JWT_ACCESS_TOKEN_EXPIRES = timedelta(hours=12)
     JWT_REFRESH_TOKEN_EXPIRES = timedelta(days=7)
