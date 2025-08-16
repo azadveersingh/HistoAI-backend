@@ -5,6 +5,7 @@ from ..models.user import User
 BOOK_COLLECTION = "books"
 PROJECT_COLLECTION = "project-details"
 OCR_PROCESS_COLLECTION = "ocr_process"
+STRUCTURED_DATA_COLLECTION = "structured_data"
 
 def serialize_book(book):
     return {
@@ -12,7 +13,7 @@ def serialize_book(book):
         "fileName": book.get("fileName"),
         "bookName": book.get("bookName"),
         "author": book.get("author"),
-        "author2": book.get("author2", ""),  # Default to empty string if not present
+        "author2": book.get("author2", ""), 
         "edition": book.get("edition"),
         "fileSize": book.get("fileSize"),
         "pages": book.get("pages"),
@@ -20,9 +21,11 @@ def serialize_book(book):
         "frontPageImagePath": book.get("frontPageImagePath"),
         "previewUrl": book.get("previewUrl"),
         "ocrProcessId": str(book["ocrProcessId"]) if book.get("ocrProcessId") else None,
+        "structuredDataId": str(book["structuredDataId"]) if book.get("structuredDataId") else None,  # Add structuredDataId
         "createdBy": str(book["createdBy"]) if book.get("createdBy") else None,
         "createdAt": book.get("createdAt", datetime.now(timezone.utc)).isoformat(),
-        "updatedAt": book.get("updatedAt", datetime.now(timezone.utc)).isoformat()
+        "updatedAt": book.get("updatedAt", datetime.now(timezone.utc)).isoformat(),
+        "chunkCsvPath": book.get("chunkCsvPath", "")  # Add chunkCsvPath
     }
 
 def create_book(mongo, book_data):
@@ -59,6 +62,10 @@ def update_book(mongo, book_id, update_fields):
     return result.modified_count > 0
 
 def delete_book(mongo, book_id):
+    # Delete associated structured data
+    book = mongo.db[BOOK_COLLECTION].find_one({"_id": ObjectId(book_id)})
+    if book and book.get("structuredDataId"):
+        mongo.db[STRUCTURED_DATA_COLLECTION].delete_one({"_id": ObjectId(book["structuredDataId"])})
     result = mongo.db[BOOK_COLLECTION].delete_one({"_id": ObjectId(book_id)})
     return result.deleted_count > 0
 

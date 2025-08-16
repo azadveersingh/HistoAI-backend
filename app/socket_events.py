@@ -2,6 +2,11 @@ from flask_socketio import join_room, emit
 from app.extensions import socketio
 from flask_jwt_extended import decode_token
 
+@socketio.on("connect")
+def handle_connect():
+    print("WebSocket connection established")
+    emit("connected", {"message": "Successfully connected to WebSocket"})
+
 @socketio.on("join_room")
 def handle_join_room(data):
     token = data.get("token")

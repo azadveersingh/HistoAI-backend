@@ -5,7 +5,8 @@ import re
 import json
 from pathlib import Path
 import shutil
-from ..extensions import mongo
+import numpy
+from ..extensions import mongo, socketio  # Import socketio
 from ..models import ocr_model
 from ..config import Config
 from datetime import datetime, timezone
@@ -13,6 +14,7 @@ from datetime import datetime, timezone
 # ========================== CONFIG ==========================
 
 os.environ["RECOGNITION_BATCH_SIZE"] = "512"
+os.environ["MKL_SERVICE_FORCE_INTEL"] = "1"  # Force MK城市的 threading layer to avoid conflict
 SURYA_ENV = "ocr-llm-surya"
 TASK_NAME = "ocr_with_boxes"
 
@@ -33,9 +35,15 @@ def get_surya_output_folder(base_output, pdf_name):
 
 # ======================== OCR FUNCTION =========================
 
-def run_surya_ocr(pdf_path, output_dir):
-    """Run Surya-OCR on input PDF"""
+def run_surya_ocr(pdf_path, output_dir, book_id):
+    """Run Surya-OCR on input PDF and emit WebSocket progress events"""
     print("🔍 Running Surya-OCR...")
+    socketio.emit("book_progress", {
+        "book_id": book_id,
+        "status": "start_ocr_processing",
+        "message": f"Starting OCR processing for {os.path.basename(pdf_path)}"
+    })
+    
     cmd = [
         "surya_ocr", pdf_path,
         "--task_name", TASK_NAME,
@@ -46,28 +54,71 @@ def run_surya_ocr(pdf_path, output_dir):
     try:
         result = subprocess.run(cmd, check=True, capture_output=True, text=True)
         print("✅ OCR complete.\n")
+        socketio.emit("book_progress", {
+            "book_id": book_id,
+            "status": "ocr_done",
+            "message": f"OCR completed for {os.path.basename(pdf_path)}"
+        })
         return True, None
     except subprocess.CalledProcessError as e:
         error_msg = f"Surya-OCR failed: {str(e)}\nOutput: {e.output}\nError: {e.stderr}"
         print(f"❌ {error_msg}")
+        socketio.emit("book_progress", {
+            "book_id": book_id,
+            "status": "error",
+            "message": f"OCR failed for {os.path.basename(pdf_path)}: {error_msg}"
+        })
         return False, error_msg
 
 # =================== TEXT GENERATOR ===================
 
-def extract_text_to_txt(results_json_path, output_txt_path, pdf_name):
-    """Extract text from Surya's JSON into a structured TXT"""
+def extract_text_to_txt(results_json_path, output_txt_path, pdf_name, book_id):
+    """Extract text from Surya's JSON into a structured TXT and emit progress events"""
     print("📝 Extracting text to TXT...")
+    socketio.emit("book_progress", {
+        "book_id": book_id,
+        "status": "processing",
+        "message": f"Extracting OCR text for {pdf_name}",
+        "progress": 50
+    })
 
     if not os.path.exists(results_json_path):
-        raise FileNotFoundError(f"❌ results.json not found: {results_json_path}")
+        error_msg = f"results.json not found: {results_json_path}"
+        socketio.emit("book_progress", {
+            "book_id": book_id,
+            "status": "error",
+            "message": error_msg
+        })
+        raise FileNotFoundError(f"❌ {error_msg}")
 
     with open(results_json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
+    pages = data.get(pdf_name, [])
+    total_pages = len(pages)
+
+    print(f"📄 Total pages detected: {total_pages}")
+    socketio.emit("book_progress", {
+        "book_id": book_id,
+        "status": "total_pages",
+        "message": f"Book {pdf_name} has {total_pages} pages",
+        "total_pages": total_pages
+    })
+
     pagewise_output = []
 
-    for idx, page_data in enumerate(data.get(pdf_name, [])):
+    for idx, page_data in enumerate(pages):
         page_number = idx + 1
+        progress_percent = round((page_number / total_pages) * 100, 2)
+
+        print(f"➡️ Processing page {page_number}/{total_pages} ({progress_percent}%)")
+        socketio.emit("book_progress", {
+            "book_id": book_id,
+            "status": "processing",
+            "message": f"Processing page {page_number}/{total_pages} for {pdf_name}",
+            "progress": progress_percent
+        })
+
         pagewise_output.append(f"<----- Page {page_number} ----->")
 
         lines = page_data.get("text_lines", [])
@@ -82,11 +133,17 @@ def extract_text_to_txt(results_json_path, output_txt_path, pdf_name):
         f.write("\n".join(pagewise_output))
 
     print(f"✅ Text saved to: {output_txt_path}")
+    socketio.emit("book_progress", {
+        "book_id": book_id,
+        "status": "ocr_done",
+        "message": f"OCR text extraction completed for {pdf_name}",
+        "progress": 100
+    })
 
 # ============================ MAIN ============================
 
 def process_book_ocr(book_id, pdf_path):
-    """Process OCR for a book and update the OCR process in the database"""
+    """Process OCR for a book, update the OCR process in the database, and emit WebSocket events"""
     start_time = time.time()
     pdf_name = get_pdf_name(pdf_path)
     book_dir = os.path.join(Config.BOOK_UPLOAD_DIR, book_id)
@@ -99,15 +156,29 @@ def process_book_ocr(book_id, pdf_path):
 
     ocr_process = ocr_model.get_ocr_process_by_book(mongo, book_id)
     if not ocr_process:
+        socketio.emit("book_progress", {
+            "book_id": book_id,
+            "status": "error",
+            "message": f"OCR process not found for book ID {book_id}"
+        })
         return False, "OCR process not found"
 
+    # Emit book received event
+    socketio.emit("book_progress", {
+        "book_id": book_id,
+        "status": "book_received",
+        "message": f"Book {pdf_name} received for OCR processing"
+    })
+
+    # Update OCR process to processing
     ocr_model.update_ocr_process(mongo, ocr_process["_id"], {
         "status": "processing",
         "progress": 10,
         "updatedAt": datetime.now(timezone.utc)
     })
 
-    success, error_message = run_surya_ocr(pdf_path, surya_output_dir)
+    # Run Surya OCR
+    success, error_message = run_surya_ocr(pdf_path, surya_output_dir, book_id)
     if not success:
         ocr_model.update_ocr_process(mongo, ocr_process["_id"], {
             "status": "failed",
@@ -117,13 +188,15 @@ def process_book_ocr(book_id, pdf_path):
         })
         return False, error_message
 
+    # Update progress after OCR
     ocr_model.update_ocr_process(mongo, ocr_process["_id"], {
         "progress": 50,
         "updatedAt": datetime.now(timezone.utc)
     })
 
     try:
-        extract_text_to_txt(results_json_path, output_txt_path, pdf_name)
+        # Extract text to TXT
+        extract_text_to_txt(results_json_path, output_txt_path, pdf_name, book_id)
         ocr_model.update_ocr_process(mongo, ocr_process["_id"], {
             "progress": 100,
             "status": "completed",
@@ -137,6 +210,11 @@ def process_book_ocr(book_id, pdf_path):
 
     except Exception as e:
         error_message = f"OCR processing failed: {str(e)}"
+        socketio.emit("book_progress", {
+            "book_id": book_id,
+            "status": "error",
+            "message": error_message
+        })
         ocr_model.update_ocr_process(mongo, ocr_process["_id"], {
             "status": "failed",
             "errorMessage": error_message,
