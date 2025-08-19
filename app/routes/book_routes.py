@@ -118,9 +118,8 @@ def upload_books():
         authors = request.form.getlist("author")
         authors2 = request.form.getlist("author2")
         editions = request.form.getlist("edition")
-        selected_llm_url = request.form.get("llm_url", local_LLM_URL)  # Default to local_LLM_URL
+        selected_llm_url = request.form.get("llm_url", local_LLM_URL)
 
-        # Validate that bookName and primary author match the number of files
         if len(book_names) != len(files) or len(authors) != len(files):
             return jsonify({"error": "Number of bookName and primary author entries must match number of files"}), 400
 
@@ -171,7 +170,6 @@ def upload_books():
                 })
                 continue
 
-            # Create book-specific folder
             book_doc = {
                 "bookName": book_name,
                 "author": author,
@@ -183,7 +181,6 @@ def upload_books():
             }
             inserted_id = book_model.create_book(mongo, book_doc)
 
-            # Emit book received event
             socketio.emit("book_progress", {
                 "book_id": inserted_id,
                 "status": "book_received",
@@ -191,16 +188,13 @@ def upload_books():
             }, room=user_id)
 
             book_dir = create_book_folder_structure(inserted_id)
-
-            # Save file to book-specific folder
             filename = secure_filename(file.filename)
             filepath = os.path.join(book_dir, filename)
             file.save(filepath)
 
-            # Get file size
             file_size = os.path.getsize(filepath)
+            pdf_file_path = f"{inserted_id}/{filename}"  # previewUrl points to the PDF file
 
-            # Get total pages
             try:
                 with open(filepath, "rb") as f:
                     reader = PdfReader(f)
@@ -224,9 +218,8 @@ def upload_books():
                 })
                 continue
 
-            # Create PDF preview
             try:
-                preview_url = create_pdf_preview(inserted_id, filepath)
+                preview_image_path = create_pdf_preview(inserted_id, filepath)  # JPG preview image path
             except Exception as e:
                 socketio.emit("book_progress", {
                     "book_id": inserted_id,
@@ -239,11 +232,9 @@ def upload_books():
                 })
                 continue
 
-            # Create OCR process
             ocr_process_id = ocr_model.create_ocr_process(mongo, inserted_id)
             book_model.update_book(mongo, inserted_id, {"ocrProcessId": ObjectId(ocr_process_id)})
 
-            # Run OCR processing
             socketio.emit("book_progress", {
                 "book_id": inserted_id,
                 "status": "start_ocr_processing",
@@ -264,22 +255,20 @@ def upload_books():
                     "fileName": filename,
                     "fileSize": file_size,
                     "pages": pages,
-                    "visibility": "private",
-                    "frontPageImagePath": preview_url,
-                    "previewUrl": preview_url,
+                    "visibility": "public",
+                    "frontPageImagePath": preview_image_path,
+                    "previewUrl": pdf_file_path,  # Explicitly set to PDF path
                     "ocrProcessId": ObjectId(ocr_process_id),
                     "ocrStatus": "failed"
                 })
                 continue
 
-            # Emit OCR done event
             socketio.emit("book_progress", {
                 "book_id": inserted_id,
                 "status": "ocr_done",
                 "message": f"OCR completed for '{book_name}'"
             }, room=user_id)
 
-            # Perform chunking if OCR is successful
             try:
                 chunk_results, csv_file_path = process_and_get_chunks(filepath, book_dir, filename, inserted_id)
                 if not chunk_results:
@@ -296,9 +285,9 @@ def upload_books():
                         "fileName": filename,
                         "fileSize": file_size,
                         "pages": pages,
-                        "visibility": "private",
-                        "frontPageImagePath": preview_url,
-                        "previewUrl": preview_url,
+                        "visibility": "public",
+                        "frontPageImagePath": preview_image_path,
+                        "previewUrl": pdf_file_path,  # Explicitly set to PDF path
                         "ocrProcessId": ObjectId(ocr_process_id),
                         "ocrStatus": "failed",
                         "chunkCsvPath": ""
@@ -318,25 +307,19 @@ def upload_books():
                     "fileName": filename,
                     "fileSize": file_size,
                     "pages": pages,
-                    "visibility": "private",
-                    "frontPageImagePath": preview_url,
-                    "previewUrl": preview_url,
+                    "visibility": "public",
+                    "frontPageImagePath": preview_image_path,
+                    "previewUrl": pdf_file_path,  # Explicitly set to PDF path
                     "ocrProcessId": ObjectId(ocr_process_id),
                     "ocrStatus": "failed",
                     "chunkCsvPath": ""
                 })
                 continue
 
-            # Run structured data extraction
             try:
-                socketio.emit("book_progress", {
-                    "book_id": inserted_id,
-                    "status": "start_data_extraction",
-                    "message": f"Starting structured data extraction for '{book_name}'"
-                }, room=user_id)
                 result, status_code = send_chunks_to_llm(
                     inserted_id, csv_file_path, book_dir, book_name, user_id,
-                    filename, preview_url, filepath, inserted_id, selected_llm_url
+                    filename, pdf_file_path, filepath, inserted_id, selected_llm_url
                 )
                 if status_code != 200:
                     socketio.emit("book_progress", {
@@ -352,19 +335,14 @@ def upload_books():
                         "fileName": filename,
                         "fileSize": file_size,
                         "pages": pages,
-                        "visibility": "private",
-                        "frontPageImagePath": preview_url,
-                        "previewUrl": preview_url,
+                        "visibility": "public",
+                        "frontPageImagePath": preview_image_path,
+                        "previewUrl": pdf_file_path,  # Explicitly set to PDF path
                         "ocrProcessId": ObjectId(ocr_process_id),
                         "ocrStatus": "completed",
                         "chunkCsvPath": csv_file_path
                     })
                     continue
-                socketio.emit("book_progress", {
-                    "book_id": inserted_id,
-                    "status": "data_extraction_done",
-                    "message": f"Structured data extraction completed for '{book_name}'"
-                }, room=user_id)
             except Exception as e:
                 socketio.emit("book_progress", {
                     "book_id": inserted_id,
@@ -379,23 +357,28 @@ def upload_books():
                     "fileName": filename,
                     "fileSize": file_size,
                     "pages": pages,
-                    "visibility": "private",
-                    "frontPageImagePath": preview_url,
-                    "previewUrl": preview_url,
+                    "visibility": "public",
+                    "frontPageImagePath": preview_image_path,
+                    "previewUrl": pdf_file_path,  # Explicitly set to PDF path
                     "ocrProcessId": ObjectId(ocr_process_id),
                     "ocrStatus": "completed",
                     "chunkCsvPath": csv_file_path
                 })
                 continue
 
-            # Update book document with file details, OCR process ID, and chunk CSV path
+            socketio.emit("book_progress", {
+                "book_id": inserted_id,
+                "status": "book_processing_complete",
+                "message": f"Book processing completed for '{book_name}'"
+            }, room=user_id)
+
             book_doc_update = {
                 "fileName": filename,
                 "fileSize": file_size,
                 "pages": pages,
-                "visibility": "private",
-                "frontPageImagePath": preview_url,
-                "previewUrl": preview_url,
+                "visibility": "public",
+                "frontPageImagePath": preview_image_path,  # JPG preview image
+                "previewUrl": pdf_file_path,  # PDF file path
                 "ocrProcessId": ObjectId(ocr_process_id),
                 "ocrStatus": "completed",
                 "chunkCsvPath": csv_file_path
@@ -410,10 +393,11 @@ def upload_books():
                 "author2": author2,
                 "edition": edition,
                 "pages": pages,
-                "previewUrl": f"/{preview_url}",
+                "previewUrl": f"/{pdf_file_path}",  # Return PDF path
                 "ocrStatus": "completed",
                 "ocrMessage": message,
-                "chunkCsvPath": csv_file_path
+                "chunkCsvPath": csv_file_path,
+                "frontPageImagePath": f"/{preview_image_path}"  # Return JPG preview path
             })
 
         if not uploaded and failed_uploads:

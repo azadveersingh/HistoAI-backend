@@ -88,7 +88,7 @@ def process_and_get_chunks(file_path: str, unique_folder: str, filename: str, bo
         chunk_results = []
         with open(csv_file_path, 'w', newline='', encoding='utf-8') as csvfile:
             writer = csv.writer(csvfile)
-            writer.writerow(['chunk_id', 'chunk_text', 'source_url'])
+            writer.writerow(['Chunk ID', 'Text Chunk', 'Source URL'])
             for idx, chunk in enumerate(chunks, start=1):
                 source_url = f"{unique_folder}/{filename}#page={idx}"
                 writer.writerow([idx, chunk, source_url])
@@ -99,13 +99,6 @@ def process_and_get_chunks(file_path: str, unique_folder: str, filename: str, bo
             "book_id": book_id,
             "status": "chunking_completed",
             "message": f"Chunking completed for {filename}, {len(chunks)} chunks created"
-        })
-
-        # Emit book processing complete event
-        socketio.emit("book_progress", {
-            "book_id": book_id,
-            "status": "book_processing_complete",
-            "message": f"Book processing completed for {filename}"
         })
 
         return chunk_results, csv_file_path

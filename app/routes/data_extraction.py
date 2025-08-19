@@ -28,20 +28,21 @@ def send_chunks_to_llm(book_id, csv_file_path, book_folder, book_name, user_id, 
             total_chunks_csv = sum(1 for _ in reader)
         except Exception as e:
             print(f"❌ Error reading CSV: {str(e)}")
-            socketio.emit("upload_status", {
+            socketio.emit("book_progress", {
                 "book_id": book_id,
+                "status": "error",
                 "message": f"Failed to read CSV: {str(e)}",
-                "progress": 0,
-                "book_id": book_id
+                "bookName": book_name
             }, room=user_id)
             return {"error": f"Failed to read CSV: {str(e)}"}, 400
 
-    socketio.emit("upload_status", {
+    socketio.emit("book_progress", {
         "book_id": book_id,
-        "message": f"Total {total_chunks_csv} chunks identified.",
+        "status": "start_data_extraction",
+        "message": f"Total {total_chunks_csv} chunks identified for '{book_name}'",
         "total_chunks": total_chunks_csv,
-        "progress": 0,
-        "book_id": book_id
+        "processed_chunks": 0,
+        "bookName": book_name
     }, room=user_id)
 
     # Create structured data entry in the database
@@ -83,10 +84,11 @@ def send_chunks_to_llm(book_id, csv_file_path, book_folder, book_name, user_id, 
 
         if response.status_code != 200:
             print(f"⚠️ {selected_llm_url} connection failed: {response.status_code} - {response.text}")
-            socketio.emit("upload_status", {
+            socketio.emit("book_progress", {
                 "book_id": book_id,
+                "status": "error",
                 "message": f"Model connection failed: {response.status_code} - {response.text}",
-                "book_id": book_id
+                "bookName": book_name
             }, room=user_id)
             structured_data.StructuredData.update(mongo, structured_data_id, {
                 "status": "failed",
@@ -96,10 +98,13 @@ def send_chunks_to_llm(book_id, csv_file_path, book_folder, book_name, user_id, 
             return {"error": f"Failed to connect to the model: {response.status_code}"}, 500
 
         print("Model connection successful!")
-        socketio.emit("upload_status", {
+        socketio.emit("book_progress", {
             "book_id": book_id,
-            "message": "Model connection successful!",
-            "book_id": book_id
+            "status": "data_extraction_progress",
+            "message": f"Connected to LLM for '{book_name}', starting chunk processing",
+            "total_chunks": total_chunks_csv,
+            "processed_chunks": 0,
+            "bookName": book_name
         }, room=user_id)
 
         with open(structured_data_path, "w", encoding="utf-8") as json_file:
@@ -110,12 +115,6 @@ def send_chunks_to_llm(book_id, csv_file_path, book_folder, book_name, user_id, 
             processed_chunks = 0
 
             print("\n📡 Waiting for response...\n")
-            socketio.emit("progress_update", {
-                "message": "Processing started...",
-                "progress": 0,
-                "book_id": book_id
-            }, room=user_id)
-
             for line in response.iter_lines():
                 if line:
                     decoded_line = line.decode("utf-8").replace("data: ", "").strip()
@@ -124,11 +123,6 @@ def send_chunks_to_llm(book_id, csv_file_path, book_folder, book_name, user_id, 
                         continue
                     try:
                         print(f"📥 Model Response: {decoded_line}")
-                        socketio.emit("model_response", {
-                            "chunk": decoded_line,
-                            "book_id": book_id
-                        }, room=user_id)
-
                         chunk_response = json.loads(decoded_line)
                         total_chunks += 1
                         processed_chunks += 1
@@ -140,10 +134,14 @@ def send_chunks_to_llm(book_id, csv_file_path, book_folder, book_name, user_id, 
                         json.dump(chunk_response, json_file)
 
                         progress_percent = int((processed_chunks / total_chunks_csv) * 100) if total_chunks_csv > 0 else 0
-                        socketio.emit("progress_update", {
-                            "message": f"Processing chunk {processed_chunks}/{total_chunks_csv}...",
+                        socketio.emit("book_progress", {
+                            "book_id": book_id,
+                            "status": "data_extraction_progress",
+                            "message": f"Processing chunk {processed_chunks}/{total_chunks_csv} for '{book_name}'",
                             "progress": progress_percent,
-                            "book_id": book_id
+                            "total_chunks": total_chunks_csv,
+                            "processed_chunks": processed_chunks,
+                            "bookName": book_name
                         }, room=user_id)
 
                         # Update structured data progress
@@ -163,15 +161,16 @@ def send_chunks_to_llm(book_id, csv_file_path, book_folder, book_name, user_id, 
 
             end_time = time.time()
             print(f"\n✅ Done! Received {total_chunks} chunks in {end_time - start_time:.2f} seconds.")
-            socketio.emit("progress_update", {
-                "message": f"✅ Processing completed! Total {total_chunks} chunks processed for {book_name}.",
-                "progress": 100,
-                "book_id": book_id
+            socketio.emit("book_progress", {
+                "book_id": book_id,
+                "status": "data_extraction_done",
+                "message": f"Structured data extraction completed for '{book_name}', processed {total_chunks} chunks",
+                "bookName": book_name
             }, room=user_id)
 
             print(f"✅ Structured data successfully saved to {structured_data_path}")
 
-        # Update structured data status (even if no chunks processed)
+        # Update structured data status
         structured_data.StructuredData.update(mongo, structured_data_id, {
             "status": "completed" if processed_chunks > 0 else "failed",
             "structuredDataPath": structured_data_path,
@@ -183,11 +182,11 @@ def send_chunks_to_llm(book_id, csv_file_path, book_folder, book_name, user_id, 
 
         if processed_chunks == 0:
             print("No valid chunks processed, but saving MongoDB record for consistency")
-            socketio.emit("upload_status", {
+            socketio.emit("book_progress", {
                 "book_id": book_id,
-                "message": f"No valid chunks processed for {book_name}. Check LLM server response.",
-                "progress": 0,
-                "book_id": book_id
+                "status": "error",
+                "message": f"No valid chunks processed for '{book_name}'. Check LLM server response.",
+                "bookName": book_name
             }, room=user_id)
 
         return {"message": "Structured data processed successfully", "structured_data_path": structured_data_path}, 200
@@ -195,11 +194,11 @@ def send_chunks_to_llm(book_id, csv_file_path, book_folder, book_name, user_id, 
     except requests.exceptions.RequestException as e:
         error_message = f"Error communicating with LLM: {str(e)}"
         print(f"❌ {error_message}")
-        socketio.emit("upload_status", {
+        socketio.emit("book_progress", {
             "book_id": book_id,
+            "status": "error",
             "message": error_message,
-            "progress": -1,
-            "book_id": book_id
+            "bookName": book_name
         }, room=user_id)
         structured_data.StructuredData.update(mongo, structured_data_id, {
             "status": "failed",
@@ -211,11 +210,11 @@ def send_chunks_to_llm(book_id, csv_file_path, book_folder, book_name, user_id, 
     except Exception as e:
         error_message = f"Structured data processing failed: {str(e)}"
         print(f"❌ {error_message}")
-        socketio.emit("upload_status", {
+        socketio.emit("book_progress", {
             "book_id": book_id,
+            "status": "error",
             "message": error_message,
-            "progress": 0,
-            "book_id": book_id
+            "bookName": book_name
         }, room=user_id)
         structured_data.StructuredData.update(mongo, structured_data_id, {
             "status": "failed",
