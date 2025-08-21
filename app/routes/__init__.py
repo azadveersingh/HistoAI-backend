@@ -6,9 +6,9 @@ def register_blueprints(app):
     from .profile import profile
     from .file_routes import file_bp
     from .data_routes import data_bp
-    from .data import excel_bp
+    from .structured_data import structured_bp
     from .token_usage import token_usage
-    from .data import excel_data 
+    from .structured_data import excel_data 
     from .otp_auth import otp_bp
     from .project_routes import project_bp
     from .admin_routes import admin_bp
@@ -25,7 +25,7 @@ def register_blueprints(app):
     app.register_blueprint(profile)
     app.register_blueprint(file_bp)
     app.register_blueprint(google_login_bp)
-    app.register_blueprint(excel_data)
+    app.register_blueprint(structured_bp)
     app.register_blueprint(token_usage)
     app.register_blueprint(otp_bp)
     app.register_blueprint(project_bp)

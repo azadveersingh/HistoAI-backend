@@ -4,7 +4,7 @@ from werkzeug.utils import secure_filename
 from ..helpers.file_helpers import allowed_file, create_pdf_preview
 from ..extensions import mongo, socketio
 from flask_socketio import emit
-from .data import get_excel_data
+from .structured_data import get_excel_data
 import os
 from .chunking import process_and_get_chunks
 import requests

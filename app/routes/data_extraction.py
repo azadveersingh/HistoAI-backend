@@ -6,7 +6,7 @@ import requests
 from bson import ObjectId
 from datetime import datetime, timezone
 from ..extensions import mongo, socketio
-from ..models import structured_data
+from ..models import structured_data_model
 from ..config import Config
 from dotenv import load_dotenv
 import sys
@@ -57,7 +57,7 @@ def send_chunks_to_llm(book_id, csv_file_path, book_folder, book_name, user_id, 
         "completedAt": None,
         "updatedAt": datetime.now(timezone.utc)
     }
-    structured_data_id = structured_data.StructuredData.create(mongo, structured_data_doc)
+    structured_data_id = structured_data_model.StructuredData.create(mongo, structured_data_doc)
 
     # Update book with structuredDataId
     from ..models import book_model
@@ -90,7 +90,7 @@ def send_chunks_to_llm(book_id, csv_file_path, book_folder, book_name, user_id, 
                 "message": f"Model connection failed: {response.status_code} - {response.text}",
                 "bookName": book_name
             }, room=user_id)
-            structured_data.StructuredData.update(mongo, structured_data_id, {
+            structured_data_model.StructuredData.update(mongo, structured_data_id, {
                 "status": "failed",
                 "errorMessage": f"Model connection failed: {response.status_code} - {response.text}",
                 "updatedAt": datetime.now(timezone.utc)
@@ -145,7 +145,7 @@ def send_chunks_to_llm(book_id, csv_file_path, book_folder, book_name, user_id, 
                         }, room=user_id)
 
                         # Update structured data progress
-                        structured_data.StructuredData.update(mongo, structured_data_id, {
+                        structured_data_model.StructuredData.update(mongo, structured_data_id, {
                             "processedChunks": processed_chunks,
                             "updatedAt": datetime.now(timezone.utc)
                         })
@@ -171,7 +171,7 @@ def send_chunks_to_llm(book_id, csv_file_path, book_folder, book_name, user_id, 
             print(f"✅ Structured data successfully saved to {structured_data_path}")
 
         # Update structured data status
-        structured_data.StructuredData.update(mongo, structured_data_id, {
+        structured_data_model.StructuredData.update(mongo, structured_data_id, {
             "status": "completed" if processed_chunks > 0 else "failed",
             "structuredDataPath": structured_data_path,
             "processedChunks": processed_chunks,
@@ -200,7 +200,7 @@ def send_chunks_to_llm(book_id, csv_file_path, book_folder, book_name, user_id, 
             "message": error_message,
             "bookName": book_name
         }, room=user_id)
-        structured_data.StructuredData.update(mongo, structured_data_id, {
+        structured_data_model.StructuredData.update(mongo, structured_data_id, {
             "status": "failed",
             "errorMessage": error_message,
             "updatedAt": datetime.now(timezone.utc)
@@ -216,7 +216,7 @@ def send_chunks_to_llm(book_id, csv_file_path, book_folder, book_name, user_id, 
             "message": error_message,
             "bookName": book_name
         }, room=user_id)
-        structured_data.StructuredData.update(mongo, structured_data_id, {
+        structured_data_model.StructuredData.update(mongo, structured_data_id, {
             "status": "failed",
             "errorMessage": error_message,
             "updatedAt": datetime.now(timezone.utc)

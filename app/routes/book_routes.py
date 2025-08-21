@@ -8,7 +8,7 @@ import smtplib
 from email.mime.text import MIMEText
 from dotenv import load_dotenv
 from ..models.user import User, UserRoles
-from ..models import book_model, project_model, ocr_model, structured_data
+from ..models import book_model, project_model, ocr_model, structured_data_model
 from ..extensions import mongo, socketio
 from ..helpers.auth_helpers import role_required
 from ..helpers.file_helpers import allowed_file, create_pdf_preview, create_book_folder_structure
@@ -522,7 +522,7 @@ def add_books_to_project(project_id):
             if not ObjectId.is_valid(bid):
                 continue
             ocr_process = ocr_model.get_ocr_process_by_book(mongo, bid)
-            structured_data_process = structured_data.StructuredData.get_by_book(mongo, bid)
+            structured_data_process = structured_data_model.StructuredData.get_by_book(mongo, bid)
             if (ocr_process and ocr_process["status"] == "completed" and
                 structured_data_process and structured_data_process["status"] == "completed"):
                 valid_book_ids.append(ObjectId(bid))
@@ -615,7 +615,7 @@ def get_all_books():
 def get_processing_books():
     try:
         ocr_processes = ocr_model.get_all_ocr_processes(mongo)
-        structured_data_processes = structured_data.StructuredData.get_all(mongo)
+        structured_data_processes = structured_data_model.StructuredData.get_all(mongo)
         processing_books = []
         for ocr_process in ocr_processes:
             if ocr_process["status"] != "completed":
@@ -852,7 +852,7 @@ def update_book_visibility(book_id):
             ocr_process = ocr_model.get_ocr_process_by_book(mongo, book_id)
             if not ocr_process or ocr_process["status"] != "completed":
                 return jsonify({"error": "Cannot set visibility to public until OCR process is completed"}), 400
-            structured_data_process = structured_data.StructuredData.get_by_book(mongo, book_id)
+            structured_data_process = structured_data_model.StructuredData.get_by_book(mongo, book_id)
             if not structured_data_process or structured_data_process["status"] != "completed":
                 return jsonify({"error": "Cannot set visibility to public until structured data processing is completed"}), 400
 
@@ -905,7 +905,7 @@ def download_structured_data(book_id):
         if not ObjectId.is_valid(book_id):
             return jsonify({"error": "Invalid book ID"}), 400
 
-        structured_data_process = structured_data.StructuredData.get_by_book(mongo, book_id)
+        structured_data_process = structured_data_model.StructuredData.get_by_book(mongo, book_id)
         if not structured_data_process:
             return jsonify({"error": "Structured data process not found for this book"}), 404
 

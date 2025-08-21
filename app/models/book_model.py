@@ -21,7 +21,7 @@ def serialize_book(book):
         "frontPageImagePath": book.get("frontPageImagePath"),
         "previewUrl": book.get("previewUrl"),
         "ocrProcessId": str(book["ocrProcessId"]) if book.get("ocrProcessId") else None,
-        "structuredDataId": str(book["structuredDataId"]) if book.get("structuredDataId") else None,  # Add structuredDataId
+        "structuredDataId": str(book["structuredDataId"]) if book.get("structuredDataId") else None, 
         "createdBy": str(book["createdBy"]) if book.get("createdBy") else None,
         "createdAt": book.get("createdAt", datetime.now(timezone.utc)).isoformat(),
         "updatedAt": book.get("updatedAt", datetime.now(timezone.utc)).isoformat(),

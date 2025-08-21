@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 # ========================== CONFIG ==========================
 
 os.environ["RECOGNITION_BATCH_SIZE"] = "512"
-os.environ["MKL_SERVICE_FORCE_INTEL"] = "1"  # Force MK城市的 threading layer to avoid conflict
+os.environ["MKL_SERVICE_FORCE_INTEL"] = "1" 
 SURYA_ENV = "ocr-llm-surya"
 TASK_NAME = "ocr_with_boxes"
 
