@@ -11,13 +11,15 @@ from ..models.user import User, UserRoles
 from ..models import book_model, project_model, ocr_model, structured_data_model
 from ..extensions import mongo, socketio
 from ..helpers.auth_helpers import role_required
-from ..helpers.file_helpers import allowed_file, create_pdf_preview, create_book_folder_structure
+from ..helpers.file_helpers import allowed_file, create_pdf_preview, create_book_folder_structure, create_structured_zip
 from ..config import Config
 from .ocr_processor import process_book_ocr
 from .chunking import process_and_get_chunks
 from .data_extraction import send_chunks_to_llm
 from PyPDF2 import PdfReader
 import logging
+import glob
+import tempfile
 
 logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
@@ -886,7 +888,7 @@ def download_ocr_text(book_id):
             return jsonify({"error": "OCR text file not found"}), 404
 
         # Redirect to the file serving route
-        filename = os.path.join(book_id, "OCR_OUTPUT.TXT")
+        filename = os.path.join(book_id, "OCR Text & Images", "ocr.txt")
         return send_file(
             text_file_path,
             as_attachment=True,
@@ -896,6 +898,73 @@ def download_ocr_text(book_id):
     except Exception as e:
         logger.error(f"Error in download_ocr_text for book_id {book_id}: {str(e)}")
         return jsonify({"error": f"Failed to download OCR text: {str(e)}"}), 500
+
+@book_bp.route("/<book_id>/ocr/zip", methods=["GET"])
+@jwt_required()
+@role_required([UserRoles.ADMIN, UserRoles.BM, UserRoles.PM, UserRoles.USER])
+def download_ocr_zip(book_id):
+    try:
+        if not ObjectId.is_valid(book_id):
+            return jsonify({"error": "Invalid book ID"}), 400
+
+        ocr_process = ocr_model.get_ocr_process_by_book(mongo, book_id)
+        if not ocr_process:
+            return jsonify({"error": "OCR process not found for this book"}), 404
+
+        if ocr_process["status"] != "completed":
+            return jsonify({"error": "OCR process is not completed"}), 400
+
+        text_file_path = ocr_process.get("ocrTextFilePath")
+        if not text_file_path or not os.path.exists(text_file_path):
+            return jsonify({"error": "OCR text file not found"}), 404
+
+        # Get the OCR directory
+        ocr_dir = os.path.join(Config.BOOK_UPLOAD_DIR, book_id, "OCR Text & Images")
+        if not os.path.exists(ocr_dir):
+            return jsonify({"error": "OCR directory not found"}), 404
+
+        # Collect all relevant file paths
+        paths_to_zip = [text_file_path]
+        image_dirs = [
+            os.path.join(ocr_dir, "images"),
+            os.path.join(ocr_dir, "handwritten_images"),
+            os.path.join(ocr_dir, "annotated_images")
+        ]
+
+        for image_dir in image_dirs:
+            if os.path.exists(image_dir):
+                paths_to_zip.extend(glob.glob(os.path.join(image_dir, "*.png")))
+
+        if not paths_to_zip:
+            return jsonify({"error": "No files found to include in ZIP"}), 404
+
+        # Create a temporary ZIP file
+        temp_dir = tempfile.gettempdir()
+        zip_filename = f"{book_id}_ocr_output.zip"
+        zip_path = os.path.join(temp_dir, zip_filename)
+
+        # Create structured ZIP
+        zip_path = create_structured_zip(paths_to_zip, zip_path)
+
+        # Serve the ZIP file
+        response = send_file(
+            zip_path,
+            as_attachment=True,
+            download_name=f"{book_id}_OCR_output.zip",
+            mimetype="application/zip"
+        )
+
+        # Clean up the temporary ZIP file after sending
+        try:
+            os.remove(zip_path)
+        except Exception as e:
+            logger.warning(f"Failed to delete temporary ZIP file {zip_path}: {str(e)}")
+
+        return response
+
+    except Exception as e:
+        logger.error(f"Error in download_ocr_zip for book_id {book_id}: {str(e)}")
+        return jsonify({"error": f"Failed to download OCR ZIP: {str(e)}"}), 500
 
 @book_bp.route("/<book_id>/structured-data", methods=["GET"])
 @jwt_required()

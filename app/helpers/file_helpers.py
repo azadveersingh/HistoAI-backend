@@ -4,6 +4,8 @@ from flask import current_app
 import fitz
 from PIL import Image
 from ..config import Config
+import zipfile
+from pathlib import Path
 
 def allowed_file(filename):
     return "." in filename and \
@@ -15,7 +17,8 @@ def create_book_folder_structure(book_id):
     subdirs = [
         os.path.join(book_dir, "Data Extraction"),
         os.path.join(book_dir, "Chatbot"),
-        os.path.join(book_dir, "Knowledge Graph")
+        os.path.join(book_dir, "Knowledge Graph"),
+        os.path.join(book_dir, "OCR Text & Images"),
     ]
     for directory in [book_dir] + subdirs:
         os.makedirs(directory, exist_ok=True)
@@ -43,3 +46,43 @@ def create_pdf_preview(book_id, file_path):
         raise
 
     return f"{book_id}/{preview_filename}"
+
+def create_structured_zip(paths, output_zip="custom_archive.zip"):
+    """
+    Creates a structured ZIP archive with specific folders:
+    - extracted_figures/
+    - handwritten_text_images/
+    - annotated_images/
+    - extracted_text.txt at root
+
+    Args:
+        paths (list): List of file paths to include in the zip.
+        output_zip (str): Name of the output zip file.
+
+    Returns:
+        str: Absolute path to the created ZIP file.
+    """
+    with zipfile.ZipFile(output_zip, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for path in paths:
+            p = Path(path)
+            if not p.exists():
+                print(f"Skipping (not found): {p}")
+                continue
+
+            # Determine target path inside ZIP
+            lower_path = str(p).lower()
+            if "images" in lower_path and "page_" in p.name and "figure_" in p.name:
+                arcname = Path("extracted_figures") / p.name
+            elif "handwritten_images" in lower_path and "page_" in p.name and "handwriting_" in p.name:
+                arcname = Path("handwritten_text_images") / p.name
+            elif "annotated_images" in lower_path:
+                arcname = Path("annotated_images") / p.name
+            elif p.name == "ocr.txt":
+                arcname = "extracted_text.txt"
+            else:
+                # Fallback: put at root with original filename
+                arcname = p.name
+
+            zipf.write(p, arcname)
+
+    return str(Path(output_zip).absolute())

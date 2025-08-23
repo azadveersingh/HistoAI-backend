@@ -11,7 +11,13 @@ def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
     
-    CORS(app, resources={r"/*": {"origins": "*", "supports_credentials": True}})
+    CORS(
+    app,
+    resources={r"/*": {"origins": "*"}},
+    supports_credentials=True,
+    expose_headers=["Content-Disposition"]
+)
+
  
 
     mongo.init_app(app)

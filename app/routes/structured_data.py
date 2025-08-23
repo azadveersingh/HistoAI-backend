@@ -4,6 +4,7 @@ import os
 import json
 import pandas as pd
 import io
+import re
 from bson import ObjectId
 from ..extensions import mongo
 from ..models import book_model, project_model, collection_model, structured_data_model
@@ -62,7 +63,6 @@ def generate_excel_data(structured_data, book_name):
                 "Source URL": source_url
             }
 
-            # Skip if all values (except Sr. No, Book Name, and Source URL) are N/A
             data_fields = [v for k, v in row.items() if k not in ["Sr. No", "Book Name", "Source URL"]]
             if all(val == "N/A" for val in data_fields):
                 continue
@@ -91,7 +91,6 @@ def generate_excel_data(structured_data, book_name):
                     "Source URL": source_url
                 }
 
-                # Skip if all values (except Sr. No, Book Name, and Source URL) are N/A
                 data_fields = [v for k, v in row.items() if k not in ["Sr. No", "Book Name", "Source URL"]]
                 if all(val == "N/A" for val in data_fields):
                     continue
@@ -122,7 +121,10 @@ def create_excel_file(extracted_rows, filename):
                 worksheet.write_url(row_num + 1, source_url_column_index, full_url, hyperlink_format, "Open PDF")
 
     output.seek(0)
-    return output, f"{os.path.splitext(filename)[0]}_structured.xlsx"
+    # Sanitize filename to remove invalid characters and ensure .xlsx extension
+    sanitized_filename = re.sub(r'[^\w\-]', '_', filename)
+    excel_filename = f"{sanitized_filename}.xlsx"
+    return output, excel_filename
 
 @structured_bp.route("/book/<book_id>", methods=["GET"])
 @jwt_required()
@@ -141,7 +143,6 @@ def get_book_structured_data(book_id):
             logger.error("Book not found in database")
             return jsonify({"error": "Book not found"}), 404
 
-        # Check access: if private, only creator or admin
         if book["visibility"] == "private":
             if book["createdBy"] != user_id and User.find_by_id(user_id)["role"] != UserRoles.ADMIN:
                 logger.error("Unauthorized access to private book")
@@ -183,38 +184,28 @@ def export_book_excel(book_id):
             logger.error("Book not found in database")
             return jsonify({"error": "Book not found"}), 404
 
-        # Check access: if private, only creator or admin
         if book["visibility"] == "private":
             if book["createdBy"] != user_id and User.find_by_id(user_id)["role"] != UserRoles.ADMIN:
                 logger.error("Unauthorized access to private book")
                 return jsonify({"error": "Unauthorized access to private book"}), 403
 
-        # Fetch structured data path and filename from Uploads collection
-        user_upload = mongo.db.Uploads.find_one(
-            {"_id": ObjectId(book_id), "user_id": user_id},
-            {"structured_data_path": 1, "filename": 1}
-        )
-        if not user_upload:
-            logger.error("No structured data found in Uploads collection")
-            return jsonify({"error": "No structured data found"}), 404
+        structured_process = structured_data_model.StructuredData.get_by_book(mongo, book_id)
+        if not structured_process or structured_process["status"] != "completed":
+            logger.error("No completed structured data for book")
+            return jsonify({"error": "No completed structured data available"}), 404
 
-        structured_path = user_upload.get("structured_data_path")
-        if not structured_path:
-            logger.error("No structured data path in database")
-            return jsonify({"error": "No structured data available"}), 404
-
+        structured_path = structured_process["structuredDataPath"]
+        logger.info(f"Structured data path for book {book_id}: {structured_path}")
         absolute_path = os.path.join(BASE_DIR, structured_path)
         if not os.path.exists(absolute_path):
             logger.error(f"Structured data file not found at: {absolute_path}")
             return jsonify({"error": "Structured data file not found"}), 404
 
-        filename = user_upload.get("filename", book["bookName"])
+        filename = book.get("fileName", book["bookName"])
 
-        # Load JSON data
         with open(absolute_path, "r", encoding="utf-8") as json_file:
             structured_data = json.load(json_file)
 
-        # Generate Excel data
         extracted_rows = generate_excel_data(structured_data, book.get("bookName", "N/A"))
         output, excel_filename = create_excel_file(extracted_rows, filename)
         if not output:
@@ -249,7 +240,6 @@ def get_project_structured_data(project_id):
             logger.error("Project not found in database")
             return jsonify({"error": "Project not found"}), 404
 
-        # Check if user is creator or member
         if str(project["createdBy"]) != str(user_id) and user_id not in [ObjectId(mid) for mid in project["memberIds"]]:
             logger.error("Unauthorized: Not a project member or creator")
             return jsonify({"error": "Unauthorized: Not a project member or creator"}), 403
@@ -258,7 +248,6 @@ def get_project_structured_data(project_id):
         selected_collection_ids = data.get("collectionIds", [])
         selected_book_ids = data.get("bookIds", [])
 
-        # Validate selected collections and books belong to the project
         project_collection_ids = [str(cid) for cid in project.get("collectionIds", [])]
         project_book_ids = [str(bid) for bid in project.get("bookIds", [])]
 
@@ -269,14 +258,12 @@ def get_project_structured_data(project_id):
             logger.error("Some selected collections or books do not belong to this project")
             return jsonify({"error": "Some selected collections or books do not belong to this project"}), 400
 
-        # Gather all unique book IDs from selected books and collections
         all_book_ids = set(valid_book_ids)
         for cid in valid_collection_ids:
             collection = collection_model.get_collection_by_id(mongo, cid)
             if collection:
                 all_book_ids.update(str(bid) for bid in collection.get("bookIds", []))
 
-        # Fetch structured data for selected books only
         combined_data = []
         for book_id in all_book_ids:
             book = book_model.get_book_by_id(mongo, book_id)
@@ -324,7 +311,6 @@ def export_project_excel(project_id):
             logger.error("Project not found in database")
             return jsonify({"error": "Project not found"}), 404
 
-        # Check if user is creator or member
         if str(project["createdBy"]) != str(user_id) and user_id not in [ObjectId(mid) for mid in project["memberIds"]]:
             logger.error("Unauthorized: Not a project member or creator")
             return jsonify({"error": "Unauthorized: Not a project member or creator"}), 403
@@ -332,11 +318,10 @@ def export_project_excel(project_id):
         data = request.get_json()
         selected_collection_ids = data.get("collectionIds", [])
         selected_book_ids = data.get("bookIds", [])
+        logger.info(f"Selected collections: {selected_collection_ids}, Selected books: {selected_book_ids}")
 
-        # Validate selected collections and books
         project_collection_ids = [str(cid) for cid in project.get("collectionIds", [])]
         project_book_ids = [str(bid) for bid in project.get("bookIds", [])]
-
         valid_collection_ids = [cid for cid in selected_collection_ids if cid in project_collection_ids]
         valid_book_ids = [bid for bid in selected_book_ids if bid in project_book_ids]
 
@@ -344,39 +329,49 @@ def export_project_excel(project_id):
             logger.error("Some selected collections or books do not belong to this project")
             return jsonify({"error": "Some selected collections or books do not belong to this project"}), 400
 
-        # Gather all unique book IDs from selected books and collections
         all_book_ids = set(valid_book_ids)
         for cid in valid_collection_ids:
             collection = collection_model.get_collection_by_id(mongo, cid)
             if collection:
                 all_book_ids.update(str(bid) for bid in collection.get("bookIds", []))
+        logger.info(f"All book IDs: {all_book_ids}")
 
-        # Fetch structured data for selected books only
         extracted_rows = []
+        skipped_books = []
         for book_id in all_book_ids:
             book = book_model.get_book_by_id(mongo, book_id)
             if not book or book["visibility"] != "public":
+                logger.warning(f"Skipping book {book_id}: Not found or not public")
+                skipped_books.append(book_id)
                 continue
 
-            # Fetch structured data path from Uploads collection
-            user_upload = mongo.db.Uploads.find_one(
-                {"_id": ObjectId(book_id)},
-                {"structured_data_path": 1}
-            )
-            if not user_upload or not user_upload.get("structured_data_path"):
+            structured_process = structured_data_model.StructuredData.get_by_book(mongo, book_id)
+            if not structured_process or structured_process["status"] != "completed":
+                logger.warning(f"No completed structured data for book {book_id}")
+                skipped_books.append(book_id)
                 continue
 
-            structured_path = user_upload["structured_data_path"]
+            structured_path = structured_process["structuredDataPath"]
+            logger.info(f"Structured data path for book {book_id}: {structured_path}")
             absolute_path = os.path.join(BASE_DIR, structured_path)
             if not os.path.exists(absolute_path):
+                logger.warning(f"Structured data file not found for book {book_id} at: {absolute_path}")
+                skipped_books.append(book_id)
                 continue
 
             with open(absolute_path, "r", encoding="utf-8") as json_file:
                 structured_data = json.load(json_file)
+                logger.info(f"Loaded structured data for book {book_id}: {len(structured_data)} entries")
 
-            # Generate Excel data for this book
             book_rows = generate_excel_data(structured_data, book.get("bookName", "N/A"))
+            logger.info(f"Extracted {len(book_rows)} rows for book {book_id}")
             extracted_rows.extend(book_rows)
+
+        logger.info(f"Total extracted rows: {len(extracted_rows)}")
+        if not extracted_rows:
+            error_msg = f"No structured data to export. Skipped books: {skipped_books}" if skipped_books else "No structured data available for the selected books."
+            logger.error(error_msg)
+            return jsonify({"error": error_msg}), 400
 
         output, excel_filename = create_excel_file(extracted_rows, project["name"])
         if not output:
