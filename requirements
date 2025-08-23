@@ -15,3 +15,5 @@ requests
 openpyxl
 flair
 Flask-Mail
+pdf2image
+surya_ocr
