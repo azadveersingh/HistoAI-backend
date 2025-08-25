@@ -166,7 +166,8 @@ def check_logged():
         "user": {
             "email": user["email"],
             "name": user.get("name"),
-            "avatar": user.get("avatar")
+            "avatar": user.get("avatar"),
+            "role": user.get("role"),
         }
     }), 200
 
